@@ -12,6 +12,11 @@ type agentExample struct{ conn *AgentSideConnection }
 
 var _ Agent = (*agentExample)(nil)
 
+// SetSessionConfigOption implements Agent.
+func (a *agentExample) SetSessionConfigOption(ctx context.Context, params SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
+	return SetSessionConfigOptionResponse{}, nil
+}
+
 // SetSessionMode implements Agent.
 func (a *agentExample) SetSessionMode(ctx context.Context, params SetSessionModeRequest) (SetSessionModeResponse, error) {
 	return SetSessionModeResponse{}, nil

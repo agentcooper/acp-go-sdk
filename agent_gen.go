@@ -160,18 +160,14 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionSetConfigOption:
-		var p UnstableSetSessionConfigOptionRequest
+		var p SetSessionConfigOptionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
 		if err := p.Validate(); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		exp, ok := a.agent.(AgentExperimental)
-		if !ok {
-			return nil, NewMethodNotFound(method)
-		}
-		resp, err := exp.UnstableSetSessionConfigOption(ctx, p)
+		resp, err := a.agent.SetSessionConfigOption(ctx, p)
 		if err != nil {
 			return nil, toReqErr(err)
 		}
