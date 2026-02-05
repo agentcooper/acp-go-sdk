@@ -119,9 +119,9 @@ type agentFuncs struct {
 	CancelFunc         func(context.Context, CancelNotification) error
 	SetSessionModeFunc func(ctx context.Context, params SetSessionModeRequest) (SetSessionModeResponse, error)
 	// Unstable (schema/meta.unstable.json)
-	UnstableForkSessionFunc            func(context.Context, UnstableForkSessionRequest) (UnstableForkSessionResponse, error)
-	UnstableListSessionsFunc           func(context.Context, UnstableListSessionsRequest) (UnstableListSessionsResponse, error)
-	UnstableResumeSessionFunc          func(context.Context, UnstableResumeSessionRequest) (UnstableResumeSessionResponse, error)
+	UnstableForkSessionFunc     func(context.Context, UnstableForkSessionRequest) (UnstableForkSessionResponse, error)
+	UnstableListSessionsFunc    func(context.Context, UnstableListSessionsRequest) (UnstableListSessionsResponse, error)
+	UnstableResumeSessionFunc   func(context.Context, UnstableResumeSessionRequest) (UnstableResumeSessionResponse, error)
 	SetSessionConfigOptionFunc  func(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
 	UnstableSetSessionModelFunc func(context.Context, UnstableSetSessionModelRequest) (UnstableSetSessionModelResponse, error)
 
