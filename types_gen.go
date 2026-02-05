@@ -589,6 +589,18 @@ func (u ClientResponse) MarshalJSON() ([]byte, error) {
 	return []byte{}, nil
 }
 
+// Session configuration options have been updated.
+type ConfigOptionUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// The full set of configuration options and their current values.
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
 // Standard content block (text, images, resources).
 type Content struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -1816,6 +1828,8 @@ type LoadSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
+	// Initial session configuration options if supported by the Agent.
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// Initial mode state if supported by the Agent
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
@@ -2183,6 +2197,8 @@ type NewSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
+	// Initial session configuration options if supported by the Agent.
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// Initial mode state if supported by the Agent
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
@@ -2852,6 +2868,262 @@ type SessionCapabilities struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 }
 
+// Unique identifier for a session configuration option value group.
+type SessionConfigGroupId string
+
+// Unique identifier for a session configuration option.
+type SessionConfigId string
+
+// A session configuration option selector and its current state.
+// Single-value selector (dropdown).
+type SessionConfigOptionSelect struct {
+	// The currently selected value.
+	CurrentValue SessionConfigValueId `json:"currentValue"`
+	// The set of selectable options.
+	Options SessionConfigSelectOptions `json:"options"`
+	Type    string                     `json:"type"`
+}
+
+type SessionConfigOption struct {
+	// Single-value selector (dropdown).
+	Select *SessionConfigOptionSelect `json:"-"`
+}
+
+func (u *SessionConfigOption) UnmarshalJSON(b []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+		{
+			var disc string
+			if v, ok := m["type"]; ok {
+				json.Unmarshal(v, &disc)
+			}
+			switch disc {
+			case "select":
+				var v SessionConfigOptionSelect
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Select = &v
+				return nil
+			}
+		}
+		{
+			var v SessionConfigOptionSelect
+			var match bool = true
+			if _, ok := m["type"]; !ok {
+				match = false
+			}
+			if _, ok := m["currentValue"]; !ok {
+				match = false
+			}
+			if _, ok := m["options"]; !ok {
+				match = false
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Select = &v
+				return nil
+			}
+		}
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	{
+		var v SessionConfigOptionSelect
+		if json.Unmarshal(b, &v) == nil {
+			u.Select = &v
+			return nil
+		}
+	}
+	return nil
+}
+func (u SessionConfigOption) MarshalJSON() ([]byte, error) {
+	if u.Select != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.Select)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["type"] = "select"
+		return json.Marshal(m)
+	}
+	return []byte{}, nil
+}
+
+func (u *SessionConfigOption) Validate() error {
+	var count int
+	if u.Select != nil {
+		count++
+	}
+	if count != 1 {
+		return errors.New("SessionConfigOption must have exactly one variant set")
+	}
+	return nil
+}
+
+// Semantic category for a session configuration option.
+//
+// This is intended to help Clients distinguish broadly common selectors (e.g. model selector vs
+// session mode selector vs thought/reasoning level) for UX purposes (keyboard shortcuts, icons,
+// placement). It MUST NOT be required for correctness. Clients MUST handle missing or unknown
+// categories gracefully.
+//
+// Category names beginning with '_' are free for custom use, like other ACP extension methods.
+// Category names that do not begin with '_' are reserved for the ACP spec.
+// Unknown / uncategorized selector.
+type SessionConfigOptionCategoryOther struct{}
+
+type SessionConfigOptionCategory struct {
+	// Unknown / uncategorized selector.
+	Other *SessionConfigOptionCategoryOther `json:"-"`
+}
+
+func (u *SessionConfigOptionCategory) UnmarshalJSON(b []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	{
+		var v SessionConfigOptionCategoryOther
+		if json.Unmarshal(b, &v) == nil {
+			u.Other = &v
+			return nil
+		}
+	}
+	return nil
+}
+func (u SessionConfigOptionCategory) MarshalJSON() ([]byte, error) {
+	if u.Other != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.Other)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	return []byte{}, nil
+}
+
+// A single-value selector (dropdown) session configuration option payload.
+type SessionConfigSelect struct {
+	// The currently selected value.
+	CurrentValue SessionConfigValueId `json:"currentValue"`
+	// The set of selectable options.
+	Options SessionConfigSelectOptions `json:"options"`
+}
+
+// A group of possible values for a session configuration option.
+type SessionConfigSelectGroup struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Unique identifier for this group.
+	Group SessionConfigGroupId `json:"group"`
+	// Human-readable label for this group.
+	Name string `json:"name"`
+	// The set of option values in this group.
+	Options []SessionConfigSelectOption `json:"options"`
+}
+
+// A possible value for a session configuration option.
+type SessionConfigSelectOption struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Optional description for this option value.
+	Description *string `json:"description,omitempty"`
+	// Human-readable label for this option value.
+	Name string `json:"name"`
+	// Unique identifier for this option value.
+	Value SessionConfigValueId `json:"value"`
+}
+
+// Possible values for a session configuration option.
+// A flat list of options with no grouping.
+type SessionConfigSelectOptionsUngrouped struct{}
+
+// A list of options grouped under headers.
+type SessionConfigSelectOptionsGrouped struct{}
+
+type SessionConfigSelectOptions struct {
+	// A flat list of options with no grouping.
+	Ungrouped *SessionConfigSelectOptionsUngrouped `json:"-"`
+	// A list of options grouped under headers.
+	Grouped *SessionConfigSelectOptionsGrouped `json:"-"`
+}
+
+func (u *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	{
+		var v SessionConfigSelectOptionsUngrouped
+		if json.Unmarshal(b, &v) == nil {
+			u.Ungrouped = &v
+			return nil
+		}
+	}
+	{
+		var v SessionConfigSelectOptionsGrouped
+		if json.Unmarshal(b, &v) == nil {
+			u.Grouped = &v
+			return nil
+		}
+	}
+	return nil
+}
+func (u SessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
+	if u.Ungrouped != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.Ungrouped)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	if u.Grouped != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.Grouped)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	return []byte{}, nil
+}
+
+// Unique identifier for a session configuration option value.
+type SessionConfigValueId string
+
 // A unique identifier for a conversation session between a client and agent.
 //
 // Sessions maintain their own context, conversation history, and state,
@@ -3059,6 +3331,19 @@ type SessionCurrentModeUpdate struct {
 	SessionUpdate string        `json:"sessionUpdate"`
 }
 
+// Session configuration options have been updated.
+type SessionConfigOptionUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// The full set of configuration options and their current values.
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+	SessionUpdate string                `json:"sessionUpdate"`
+}
+
 type SessionUpdate struct {
 	// A chunk of the user's message being streamed.
 	UserMessageChunk *SessionUpdateUserMessageChunk `json:"-"`
@@ -3079,6 +3364,8 @@ type SessionUpdate struct {
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
 	CurrentModeUpdate *SessionCurrentModeUpdate `json:"-"`
+	// Session configuration options have been updated.
+	ConfigOptionUpdate *SessionConfigOptionUpdate `json:"-"`
 }
 
 func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
@@ -3145,6 +3432,13 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 					return errors.New("invalid variant payload")
 				}
 				u.CurrentModeUpdate = &v
+				return nil
+			case "config_option_update":
+				var v SessionConfigOptionUpdate
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.ConfigOptionUpdate = &v
 				return nil
 			}
 		}
@@ -3287,6 +3581,23 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 				return nil
 			}
 		}
+		{
+			var v SessionConfigOptionUpdate
+			var match bool = true
+			if _, ok := m["sessionUpdate"]; !ok {
+				match = false
+			}
+			if _, ok := m["configOptions"]; !ok {
+				match = false
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.ConfigOptionUpdate = &v
+				return nil
+			}
+		}
 	} else {
 		if _, ok := err.(*json.UnmarshalTypeError); !ok {
 			return err
@@ -3345,6 +3656,13 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 		var v SessionCurrentModeUpdate
 		if json.Unmarshal(b, &v) == nil {
 			u.CurrentModeUpdate = &v
+			return nil
+		}
+	}
+	{
+		var v SessionConfigOptionUpdate
+		if json.Unmarshal(b, &v) == nil {
+			u.ConfigOptionUpdate = &v
 			return nil
 		}
 	}
@@ -3447,6 +3765,18 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 		m["sessionUpdate"] = "current_mode_update"
 		return json.Marshal(m)
 	}
+	if u.ConfigOptionUpdate != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.ConfigOptionUpdate)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = "config_option_update"
+		return json.Marshal(m)
+	}
 	return []byte{}, nil
 }
 
@@ -3476,8 +3806,50 @@ func (u *SessionUpdate) Validate() error {
 	if u.CurrentModeUpdate != nil {
 		count++
 	}
+	if u.ConfigOptionUpdate != nil {
+		count++
+	}
 	if count != 1 {
 		return errors.New("SessionUpdate must have exactly one variant set")
+	}
+	return nil
+}
+
+// Request parameters for setting a session configuration option.
+type SetSessionConfigOptionRequest struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// The ID of the configuration option to set.
+	ConfigId SessionConfigId `json:"configId"`
+	// The ID of the session to set the configuration option for.
+	SessionId SessionId `json:"sessionId"`
+	// The ID of the configuration option value to set.
+	Value SessionConfigValueId `json:"value"`
+}
+
+func (v *SetSessionConfigOptionRequest) Validate() error {
+	return nil
+}
+
+// Response to 'session/set_config_option' method.
+type SetSessionConfigOptionResponse struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// The full set of configuration options and their current values.
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
+func (v *SetSessionConfigOptionResponse) Validate() error {
+	if v.ConfigOptions == nil {
+		return fmt.Errorf("configOptions is required")
 	}
 	return nil
 }
@@ -4050,12 +4422,8 @@ type UnstableForkSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
-	// **UNSTABLE**
-	//
-	// This capability is not part of the spec yet, and may be removed or changed at any point.
-	//
 	// Initial session configuration options if supported by the Agent.
-	ConfigOptions []UnstableSessionConfigOption `json:"configOptions,omitempty"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// **UNSTABLE**
 	//
 	// This capability is not part of the spec yet, and may be removed or changed at any point.
@@ -4195,12 +4563,8 @@ type UnstableResumeSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
-	// **UNSTABLE**
-	//
-	// This capability is not part of the spec yet, and may be removed or changed at any point.
-	//
 	// Initial session configuration options if supported by the Agent.
-	ConfigOptions []UnstableSessionConfigOption `json:"configOptions,omitempty"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// **UNSTABLE**
 	//
 	// This capability is not part of the spec yet, and may be removed or changed at any point.
@@ -4216,298 +4580,6 @@ type UnstableResumeSessionResponse struct {
 func (v *UnstableResumeSessionResponse) Validate() error {
 	return nil
 }
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Unique identifier for a session configuration option value group.
-type UnstableSessionConfigGroupId string
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Unique identifier for a session configuration option.
-type UnstableSessionConfigId string
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// A session configuration option selector and its current state.
-// Single-value selector (dropdown).
-type UnstableSessionConfigOptionSelect struct {
-	// The currently selected value.
-	CurrentValue UnstableSessionConfigValueId `json:"currentValue"`
-	// The set of selectable options.
-	Options UnstableSessionConfigSelectOptions `json:"options"`
-	Type    string                             `json:"type"`
-}
-
-type UnstableSessionConfigOption struct {
-	// Single-value selector (dropdown).
-	Select *UnstableSessionConfigOptionSelect `json:"-"`
-}
-
-func (u *UnstableSessionConfigOption) UnmarshalJSON(b []byte) error {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err == nil {
-		{
-			var disc string
-			if v, ok := m["type"]; ok {
-				json.Unmarshal(v, &disc)
-			}
-			switch disc {
-			case "select":
-				var v UnstableSessionConfigOptionSelect
-				if json.Unmarshal(b, &v) != nil {
-					return errors.New("invalid variant payload")
-				}
-				u.Select = &v
-				return nil
-			}
-		}
-		{
-			var v UnstableSessionConfigOptionSelect
-			var match bool = true
-			if _, ok := m["type"]; !ok {
-				match = false
-			}
-			if _, ok := m["currentValue"]; !ok {
-				match = false
-			}
-			if _, ok := m["options"]; !ok {
-				match = false
-			}
-			if match {
-				if json.Unmarshal(b, &v) != nil {
-					return errors.New("invalid variant payload")
-				}
-				u.Select = &v
-				return nil
-			}
-		}
-	} else {
-		if _, ok := err.(*json.UnmarshalTypeError); !ok {
-			return err
-		}
-	}
-	{
-		var v UnstableSessionConfigOptionSelect
-		if json.Unmarshal(b, &v) == nil {
-			u.Select = &v
-			return nil
-		}
-	}
-	return nil
-}
-func (u UnstableSessionConfigOption) MarshalJSON() ([]byte, error) {
-	if u.Select != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Select)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		m["type"] = "select"
-		return json.Marshal(m)
-	}
-	return []byte{}, nil
-}
-
-func (u *UnstableSessionConfigOption) Validate() error {
-	var count int
-	if u.Select != nil {
-		count++
-	}
-	if count != 1 {
-		return errors.New("UnstableSessionConfigOption must have exactly one variant set")
-	}
-	return nil
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Semantic category for a session configuration option.
-//
-// This is intended to help Clients distinguish broadly common selectors (e.g. model selector vs
-// session mode selector vs thought/reasoning level) for UX purposes (keyboard shortcuts, icons,
-// placement). It MUST NOT be required for correctness. Clients MUST handle missing or unknown
-// categories gracefully.
-//
-// Category names beginning with '_' are free for custom use, like other ACP extension methods.
-// Category names that do not begin with '_' are reserved for the ACP spec.
-// Unknown / uncategorized selector.
-type UnstableSessionConfigOptionCategoryOther struct{}
-
-type UnstableSessionConfigOptionCategory struct {
-	// Unknown / uncategorized selector.
-	Other *UnstableSessionConfigOptionCategoryOther `json:"-"`
-}
-
-func (u *UnstableSessionConfigOptionCategory) UnmarshalJSON(b []byte) error {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err == nil {
-	} else {
-		if _, ok := err.(*json.UnmarshalTypeError); !ok {
-			return err
-		}
-	}
-	{
-		var v UnstableSessionConfigOptionCategoryOther
-		if json.Unmarshal(b, &v) == nil {
-			u.Other = &v
-			return nil
-		}
-	}
-	return nil
-}
-func (u UnstableSessionConfigOptionCategory) MarshalJSON() ([]byte, error) {
-	if u.Other != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Other)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
-	}
-	return []byte{}, nil
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// A single-value selector (dropdown) session configuration option payload.
-type UnstableSessionConfigSelect struct {
-	// The currently selected value.
-	CurrentValue UnstableSessionConfigValueId `json:"currentValue"`
-	// The set of selectable options.
-	Options UnstableSessionConfigSelectOptions `json:"options"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// A group of possible values for a session configuration option.
-type UnstableSessionConfigSelectGroup struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// Unique identifier for this group.
-	Group UnstableSessionConfigGroupId `json:"group"`
-	// Human-readable label for this group.
-	Name string `json:"name"`
-	// The set of option values in this group.
-	Options []UnstableSessionConfigSelectOption `json:"options"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// A possible value for a session configuration option.
-type UnstableSessionConfigSelectOption struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// Optional description for this option value.
-	Description *string `json:"description,omitempty"`
-	// Human-readable label for this option value.
-	Name string `json:"name"`
-	// Unique identifier for this option value.
-	Value UnstableSessionConfigValueId `json:"value"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Possible values for a session configuration option.
-// A flat list of options with no grouping.
-type UnstableSessionConfigSelectOptionsUngrouped struct{}
-
-// A list of options grouped under headers.
-type UnstableSessionConfigSelectOptionsGrouped struct{}
-
-type UnstableSessionConfigSelectOptions struct {
-	// A flat list of options with no grouping.
-	Ungrouped *UnstableSessionConfigSelectOptionsUngrouped `json:"-"`
-	// A list of options grouped under headers.
-	Grouped *UnstableSessionConfigSelectOptionsGrouped `json:"-"`
-}
-
-func (u *UnstableSessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err == nil {
-	} else {
-		if _, ok := err.(*json.UnmarshalTypeError); !ok {
-			return err
-		}
-	}
-	{
-		var v UnstableSessionConfigSelectOptionsUngrouped
-		if json.Unmarshal(b, &v) == nil {
-			u.Ungrouped = &v
-			return nil
-		}
-	}
-	{
-		var v UnstableSessionConfigSelectOptionsGrouped
-		if json.Unmarshal(b, &v) == nil {
-			u.Grouped = &v
-			return nil
-		}
-	}
-	return nil
-}
-func (u UnstableSessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
-	if u.Ungrouped != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Ungrouped)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
-	}
-	if u.Grouped != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Grouped)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
-	}
-	return []byte{}, nil
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Unique identifier for a session configuration option value.
-type UnstableSessionConfigValueId string
 
 // **UNSTABLE**
 //
@@ -4547,53 +4619,6 @@ type UnstableSessionModelState struct {
 	AvailableModels []UnstableModelInfo `json:"availableModels"`
 	// The current model the Agent is in.
 	CurrentModelId UnstableModelId `json:"currentModelId"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Request parameters for setting a session configuration option.
-type UnstableSetSessionConfigOptionRequest struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// The ID of the configuration option to set.
-	ConfigId UnstableSessionConfigId `json:"configId"`
-	// The ID of the session to set the configuration option for.
-	SessionId SessionId `json:"sessionId"`
-	// The ID of the configuration option value to set.
-	Value UnstableSessionConfigValueId `json:"value"`
-}
-
-func (v *UnstableSetSessionConfigOptionRequest) Validate() error {
-	return nil
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Response to 'session/set_config_option' method.
-type UnstableSetSessionConfigOptionResponse struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// The full set of configuration options and their current values.
-	ConfigOptions []UnstableSessionConfigOption `json:"configOptions"`
-}
-
-func (v *UnstableSetSessionConfigOptionResponse) Validate() error {
-	if v.ConfigOptions == nil {
-		return fmt.Errorf("configOptions is required")
-	}
-	return nil
 }
 
 // **UNSTABLE**
@@ -4754,6 +4779,8 @@ type Agent interface {
 	//
 	// See protocol docs: [User Message](https://agentclientprotocol.com/protocol/prompt-turn#1-user-message)
 	Prompt(ctx context.Context, params PromptRequest) (PromptResponse, error)
+	// Request parameters for setting a session configuration option.
+	SetSessionConfigOption(ctx context.Context, params SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
 	// Request parameters for setting a session mode.
 	SetSessionMode(ctx context.Context, params SetSessionModeRequest) (SetSessionModeResponse, error)
 }
@@ -4800,12 +4827,6 @@ type AgentExperimental interface {
 	//
 	// Only available if the Agent supports the 'session.resume' capability.
 	UnstableResumeSession(ctx context.Context, params UnstableResumeSessionRequest) (UnstableResumeSessionResponse, error)
-	// **UNSTABLE**
-	//
-	// This capability is not part of the spec yet, and may be removed or changed at any point.
-	//
-	// Request parameters for setting a session configuration option.
-	UnstableSetSessionConfigOption(ctx context.Context, params UnstableSetSessionConfigOptionRequest) (UnstableSetSessionConfigOptionResponse, error)
 	// **UNSTABLE**
 	//
 	// This capability is not part of the spec yet, and may be removed or changed at any point.
