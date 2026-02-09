@@ -228,6 +228,93 @@ func TestJSONGolden_SessionUpdates(t *testing.T) {
 	))
 }
 
+func TestJSONGolden_ConfigOptions(t *testing.T) {
+	t.Parallel()
+	t.Run("set_config_option_request", runGolden(
+		func() SetSessionConfigOptionRequest {
+			return SetSessionConfigOptionRequest{
+				SessionId: "sess_abc123def456",
+				ConfigId:  "mode",
+				Value:     "code",
+			}
+		},
+	))
+	t.Run("set_config_option_response", runGolden(
+		func() SetSessionConfigOptionResponse {
+			askDesc := "Request permission before making any changes"
+			codeDesc := "Write and modify code with full tool access"
+			opts := SessionConfigSelectOptionsUngrouped{
+				{Value: "ask", Name: "Ask", Description: &askDesc},
+				{Value: "code", Name: "Code", Description: &codeDesc},
+			}
+			opt := NewSessionConfigOptionSelect()
+			opt.Select.Id = "mode"
+			opt.Select.Name = "Session Mode"
+			opt.Select.CurrentValue = "code"
+			opt.Select.Options.Ungrouped = &opts
+			return SetSessionConfigOptionResponse{
+				ConfigOptions: []SessionConfigOption{opt},
+			}
+		},
+	))
+	t.Run("new_session_response_config", runGolden(
+		func() NewSessionResponse {
+			askDesc := "Request permission before making any changes"
+			codeDesc := "Write and modify code with full tool access"
+			modeDesc := "Controls how the agent requests permission"
+			modeCat := SessionConfigOptionCategoryMode
+			modeOpts := SessionConfigSelectOptionsUngrouped{
+				{Value: "ask", Name: "Ask", Description: &askDesc},
+				{Value: "code", Name: "Code", Description: &codeDesc},
+			}
+			modeOpt := NewSessionConfigOptionSelect()
+			modeOpt.Select.Id = "mode"
+			modeOpt.Select.Name = "Session Mode"
+			modeOpt.Select.Description = &modeDesc
+			modeOpt.Select.Category = &modeCat
+			modeOpt.Select.CurrentValue = "ask"
+			modeOpt.Select.Options.Ungrouped = &modeOpts
+
+			m1Desc := "The fastest model"
+			m2Desc := "The most powerful model"
+			modelCat := SessionConfigOptionCategoryModel
+			modelOpts := SessionConfigSelectOptionsUngrouped{
+				{Value: "model-1", Name: "Model 1", Description: &m1Desc},
+				{Value: "model-2", Name: "Model 2", Description: &m2Desc},
+			}
+			modelOpt := NewSessionConfigOptionSelect()
+			modelOpt.Select.Id = "model"
+			modelOpt.Select.Name = "Model"
+			modelOpt.Select.Category = &modelCat
+			modelOpt.Select.CurrentValue = "model-1"
+			modelOpt.Select.Options.Ungrouped = &modelOpts
+
+			return NewSessionResponse{
+				SessionId:     "sess_abc123def456",
+				ConfigOptions: []SessionConfigOption{modeOpt, modelOpt},
+			}
+		},
+	))
+	t.Run("session_update_config_option_update", runGolden(
+		func() SessionUpdate {
+			askDesc := "Request permission before making any changes"
+			codeDesc := "Write and modify code with full tool access"
+			opts := SessionConfigSelectOptionsUngrouped{
+				{Value: "ask", Name: "Ask", Description: &askDesc},
+				{Value: "code", Name: "Code", Description: &codeDesc},
+			}
+			opt := NewSessionConfigOptionSelect()
+			opt.Select.Id = "mode"
+			opt.Select.Name = "Session Mode"
+			opt.Select.CurrentValue = "code"
+			opt.Select.Options.Ungrouped = &opts
+			return SessionUpdate{ConfigOptionUpdate: &SessionConfigOptionUpdate{
+				ConfigOptions: []SessionConfigOption{opt},
+			}}
+		},
+	))
+}
+
 func TestJSONGolden_MethodPayloads(t *testing.T) {
 	t.Parallel()
 	t.Run("initialize_request", runGolden(func() InitializeRequest {

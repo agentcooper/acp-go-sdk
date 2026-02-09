@@ -37,4 +37,5 @@ var (
 	List    = jen.List
 	Op      = jen.Op
 	Comment = jen.Comment
+	Len     = jen.Len
 )

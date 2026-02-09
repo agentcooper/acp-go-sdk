@@ -2877,8 +2877,22 @@ type SessionConfigId string
 // A session configuration option selector and its current state.
 // Single-value selector (dropdown).
 type SessionConfigOptionSelect struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Optional semantic category for this option (UX only).
+	Category *SessionConfigOptionCategory `json:"category,omitempty"`
 	// The currently selected value.
 	CurrentValue SessionConfigValueId `json:"currentValue"`
+	// Optional description for the Client to display to the user.
+	Description *string `json:"description,omitempty"`
+	// Unique identifier for the configuration option.
+	Id SessionConfigId `json:"id"`
+	// Human-readable label for the option.
+	Name string `json:"name"`
 	// The set of selectable options.
 	Options SessionConfigSelectOptions `json:"options"`
 	Type    string                     `json:"type"`
@@ -2917,6 +2931,12 @@ func (u *SessionConfigOption) UnmarshalJSON(b []byte) error {
 				match = false
 			}
 			if _, ok := m["options"]; !ok {
+				match = false
+			}
+			if _, ok := m["id"]; !ok {
+				match = false
+			}
+			if _, ok := m["name"]; !ok {
 				match = false
 			}
 			if match {
@@ -2977,45 +2997,13 @@ func (u *SessionConfigOption) Validate() error {
 //
 // Category names beginning with '_' are free for custom use, like other ACP extension methods.
 // Category names that do not begin with '_' are reserved for the ACP spec.
-// Unknown / uncategorized selector.
-type SessionConfigOptionCategoryOther struct{}
+type SessionConfigOptionCategory string
 
-type SessionConfigOptionCategory struct {
-	// Unknown / uncategorized selector.
-	Other *SessionConfigOptionCategoryOther `json:"-"`
-}
-
-func (u *SessionConfigOptionCategory) UnmarshalJSON(b []byte) error {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err == nil {
-	} else {
-		if _, ok := err.(*json.UnmarshalTypeError); !ok {
-			return err
-		}
-	}
-	{
-		var v SessionConfigOptionCategoryOther
-		if json.Unmarshal(b, &v) == nil {
-			u.Other = &v
-			return nil
-		}
-	}
-	return nil
-}
-func (u SessionConfigOptionCategory) MarshalJSON() ([]byte, error) {
-	if u.Other != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Other)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
-	}
-	return []byte{}, nil
-}
+const (
+	SessionConfigOptionCategoryMode         SessionConfigOptionCategory = "mode"
+	SessionConfigOptionCategoryModel        SessionConfigOptionCategory = "model"
+	SessionConfigOptionCategoryThoughtLevel SessionConfigOptionCategory = "thought_level"
+)
 
 // A single-value selector (dropdown) session configuration option payload.
 type SessionConfigSelect struct {
@@ -3059,10 +3047,10 @@ type SessionConfigSelectOption struct {
 
 // Possible values for a session configuration option.
 // A flat list of options with no grouping.
-type SessionConfigSelectOptionsUngrouped struct{}
+type SessionConfigSelectOptionsUngrouped []SessionConfigSelectOption
 
 // A list of options grouped under headers.
-type SessionConfigSelectOptionsGrouped struct{}
+type SessionConfigSelectOptionsGrouped []SessionConfigSelectGroup
 
 type SessionConfigSelectOptions struct {
 	// A flat list of options with no grouping.
@@ -3077,6 +3065,35 @@ func (u *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
 	} else {
 		if _, ok := err.(*json.UnmarshalTypeError); !ok {
 			return err
+		}
+	}
+	{
+		var arr []json.RawMessage
+		if json.Unmarshal(b, &arr) == nil {
+			if len(arr) == 0 {
+				var v SessionConfigSelectOptionsUngrouped
+				u.Ungrouped = &v
+				return nil
+			}
+			var first map[string]json.RawMessage
+			if json.Unmarshal(arr[0], &first) == nil {
+				if _, ok := first["group"]; ok {
+					var v SessionConfigSelectOptionsGrouped
+					if json.Unmarshal(b, &v) != nil {
+						return errors.New("invalid variant payload")
+					}
+					u.Grouped = &v
+					return nil
+				}
+			}
+			{
+				var v SessionConfigSelectOptionsUngrouped
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Ungrouped = &v
+				return nil
+			}
 		}
 	}
 	{
@@ -3097,28 +3114,12 @@ func (u *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
 }
 func (u SessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
 	if u.Ungrouped != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Ungrouped)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
+		return json.Marshal(*u.Ungrouped)
 	}
 	if u.Grouped != nil {
-		var m map[string]any
-		_b, _e := json.Marshal(*u.Grouped)
-		if _e != nil {
-			return []byte{}, _e
-		}
-		if json.Unmarshal(_b, &m) != nil {
-			return []byte{}, errors.New("invalid variant payload")
-		}
-		return json.Marshal(m)
+		return json.Marshal(*u.Grouped)
 	}
-	return []byte{}, nil
+	return []byte("[]"), nil
 }
 
 // Unique identifier for a session configuration option value.

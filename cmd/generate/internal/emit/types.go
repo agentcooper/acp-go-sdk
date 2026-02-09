@@ -193,6 +193,19 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				f.Const().Defs(defs...)
 			}
 			f.Line()
+		case isStringConstAnyOf(def):
+			f.Type().Id(name).String()
+			defs := []Code{}
+			for _, v := range def.AnyOf {
+				if v != nil && v.Const != nil {
+					s := fmt.Sprint(v.Const)
+					defs = append(defs, Id(util.ToEnumConst(name, s)).Id(name).Op("=").Lit(s))
+				}
+			}
+			if len(defs) > 0 {
+				f.Const().Defs(defs...)
+			}
+			f.Line()
 		case len(def.AnyOf) > 0:
 			emitUnion(f, name, schema, def, def.AnyOf, false, usedTypeNames)
 		case len(def.OneOf) > 0 && !isStringConstUnion(def):
@@ -509,6 +522,30 @@ func isStringConstUnion(def *load.Definition) bool {
 		}
 		if _, ok := v.Const.(string); !ok {
 			return false
+		}
+	}
+	return true
+}
+
+// isStringConstAnyOf returns true when the definition is an anyOf union where every
+// variant is a string type, with some having const values (named constants) and at most
+// one catch-all string without const. This pattern should be emitted as a Go string type
+// alias with named constants rather than a struct union.
+func isStringConstAnyOf(def *load.Definition) bool {
+	if def == nil || len(def.AnyOf) == 0 {
+		return false
+	}
+	for _, v := range def.AnyOf {
+		if v == nil {
+			return false
+		}
+		if ir.PrimaryType(v) != "string" {
+			return false
+		}
+		if v.Const != nil {
+			if _, ok := v.Const.(string); !ok {
+				return false
+			}
 		}
 	}
 	return true
@@ -838,14 +875,16 @@ func jenTypeForOptional(d *load.Definition) Code {
 // (title: UnstructuredCommandInput) with a required 'hint' field.
 func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Definition, defs []*load.Definition, exactlyOne bool, usedTypeNames map[string]bool) {
 	type variantInfo struct {
-		fieldName   string
-		typeName    string
-		required    []string
-		isObject    bool
-		discValue   string
-		constPairs  [][2]string
-		isNull      bool
-		description string
+		fieldName     string
+		typeName      string
+		required      []string
+		isObject      bool
+		discValue     string
+		constPairs    [][2]string
+		isNull        bool
+		description   string
+		isArray       bool
+		itemsRequired []string
 	}
 	variants := []variantInfo{}
 	discKey := ""
@@ -893,6 +932,35 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			ref = v.AllOf[0].Ref
 		}
 		v = expandAllOf(schema, v)
+		// Merge parent-level shared properties into each variant (e.g., SessionConfigOption
+		// defines id, name, description, category alongside its oneOf variant payloads).
+		if parentDef != nil && len(parentDef.Properties) > 0 {
+			vCopy := *v
+			if vCopy.Properties == nil {
+				vCopy.Properties = make(map[string]*load.Definition)
+			} else {
+				newProps := make(map[string]*load.Definition, len(vCopy.Properties)+len(parentDef.Properties))
+				for k, pv := range vCopy.Properties {
+					newProps[k] = pv
+				}
+				vCopy.Properties = newProps
+			}
+			for pk, pd := range parentDef.Properties {
+				if _, exists := vCopy.Properties[pk]; !exists {
+					vCopy.Properties[pk] = pd
+				}
+			}
+			reqSet := map[string]struct{}{}
+			for _, r := range vCopy.Required {
+				reqSet[r] = struct{}{}
+			}
+			for _, r := range parentDef.Required {
+				if _, exists := reqSet[r]; !exists {
+					vCopy.Required = append(vCopy.Required, r)
+				}
+			}
+			v = &vCopy
+		}
 		// Detect null-only variant
 		isNull := false
 		if s, ok := v.Type.(string); ok && s == "null" {
@@ -960,6 +1028,18 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			fieldName = util.ToExportedField(tname)
 		}
 		isObj := len(v.Properties) > 0
+		isArr := ir.PrimaryType(v) == "array" && v.Items != nil
+		var itemsReq []string
+		if isArr {
+			itemDef := v.Items
+			if itemDef.Ref != "" && strings.HasPrefix(itemDef.Ref, "#/$defs/") {
+				if resolved := schema.Defs[itemDef.Ref[len("#/$defs/"):]]; resolved != nil {
+					itemsReq = resolved.Required
+				}
+			} else {
+				itemsReq = itemDef.Required
+			}
+		}
 		// Skip phantom variants that have neither $ref nor object shape nor null nor title
 		// (but allow title-only variants like ExtMethodRequest to generate as empty structs)
 		if !isObj && ref == "" && !isNull && v.Title == "" {
@@ -1008,6 +1088,15 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					st = append(st, Id(field).Add(jenTypeForOptional(pDef)).Tag(map[string]string{"json": tag}))
 				}
 			} else if !isNull && !isObj && v.Title != "" {
+				// Array variants: emit as named slice types
+				if isArr {
+					if v.Description != "" {
+						emitDocComment(f, v.Description)
+					}
+					f.Type().Id(tname).Index().Add(jenTypeFor(v.Items))
+					f.Line()
+					goto skipStructEmit
+				}
 				// Title-only variants: check if they're extension types
 				// Extension types should preserve the raw payload, not drop it
 				isExtension := strings.Contains(strings.ToLower(v.Description), "extension") ||
@@ -1034,14 +1123,16 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		skipStructEmit:
 		}
 		variants = append(variants, variantInfo{
-			fieldName:   fieldName,
-			typeName:    tname,
-			required:    v.Required,
-			isObject:    isObj,
-			discValue:   dv,
-			constPairs:  consts,
-			isNull:      isNull,
-			description: v.Description,
+			fieldName:     fieldName,
+			typeName:      tname,
+			required:      v.Required,
+			isObject:      isObj,
+			discValue:     dv,
+			constPairs:    consts,
+			isNull:        isNull,
+			description:   v.Description,
+			isArray:       isArr,
+			itemsRequired: itemsReq,
 		})
 	}
 	// wrapper
@@ -1117,6 +1208,61 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			// Not an object (e.g., primitive union variant) or invalid JSON.
 			If(List(Id("_"), Id("ok")).Op(":=").Id("err").Assert(Op("*").Qual("encoding/json", "UnmarshalTypeError")), Op("!").Id("ok")).Block(Return(Id("err"))),
 		)
+		// Array union discrimination: when variants are array types, peek at the first
+		// element to distinguish them by their items' required keys.
+		{
+			arrayVis := []variantInfo{}
+			for _, vi := range variants {
+				if vi.isArray {
+					arrayVis = append(arrayVis, vi)
+				}
+			}
+			if len(arrayVis) > 0 {
+				g.BlockFunc(func(h *Group) {
+					h.Var().Id("arr").Index().Qual("encoding/json", "RawMessage")
+					h.If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("arr")).Op("==").Nil()).BlockFunc(func(ar *Group) {
+						// Empty array defaults to first array variant
+						ar.If(Len(Id("arr")).Op("==").Lit(0)).Block(
+							Var().Id("v").Id(arrayVis[0].typeName),
+							Id("u").Dot(arrayVis[0].fieldName).Op("=").Op("&").Id("v"),
+							Return(Nil()),
+						)
+						if len(arrayVis) > 1 {
+							// Peek at first element to discriminate
+							ar.Var().Id("first").Map(String()).Qual("encoding/json", "RawMessage")
+							ar.If(Qual("encoding/json", "Unmarshal").Call(Id("arr").Index(Lit(0)), Op("&").Id("first")).Op("==").Nil()).BlockFunc(func(peek *Group) {
+								// For each non-first array variant, check for unique required keys in its items
+								firstReq := map[string]bool{}
+								for _, r := range arrayVis[0].itemsRequired {
+									firstReq[r] = true
+								}
+								for i := 1; i < len(arrayVis); i++ {
+									avi := arrayVis[i]
+									for _, rk := range avi.itemsRequired {
+										if !firstReq[rk] {
+											peek.If(List(Id("_"), Id("ok")).Op(":=").Id("first").Index(Lit(rk)), Id("ok")).Block(
+												Var().Id("v").Id(avi.typeName),
+												If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")).Op("!=").Nil()).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload")))),
+												Id("u").Dot(avi.fieldName).Op("=").Op("&").Id("v"),
+												Return(Nil()),
+											)
+											break // one unique key is sufficient
+										}
+									}
+								}
+							})
+						}
+						// Default: unmarshal into first array variant
+						ar.Block(
+							Var().Id("v").Id(arrayVis[0].typeName),
+							If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")).Op("!=").Nil()).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload")))),
+							Id("u").Dot(arrayVis[0].fieldName).Op("=").Op("&").Id("v"),
+							Return(Nil()),
+						)
+					})
+				})
+			}
+		}
 		// fallback: try decode sequentially
 		for _, vi := range variants {
 			g.Block(
@@ -1136,6 +1282,9 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				// Null-only variant encodes to JSON null
 				if vi.isNull {
 					gg.Return(Qual("encoding/json", "Marshal").Call(Nil()))
+				} else if vi.isArray {
+					// Array variants: marshal the slice directly
+					gg.Return(Qual("encoding/json", "Marshal").Call(Op("*").Id("u").Dot(vi.fieldName)))
 				} else {
 					// Marshal variant to map for discriminant injection and shaping
 					gg.Var().Id("m").Map(String()).Any()
@@ -1220,7 +1369,19 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				}
 			})
 		}
-		g.Return(Index().Byte().Values(), Nil())
+		// For all-array unions, return empty JSON array as fallback; otherwise empty bytes.
+		allArray := len(variants) > 0
+		for _, vi := range variants {
+			if !vi.isArray {
+				allArray = false
+				break
+			}
+		}
+		if allArray {
+			g.Return(Index().Byte().Call(Lit("[]")), Nil())
+		} else {
+			g.Return(Index().Byte().Values(), Nil())
+		}
 	})
 	f.Line()
 

@@ -1,0 +1,23 @@
+{
+  "sessionUpdate": "config_option_update",
+  "configOptions": [
+    {
+      "id": "mode",
+      "name": "Session Mode",
+      "type": "select",
+      "currentValue": "code",
+      "options": [
+        {
+          "value": "ask",
+          "name": "Ask",
+          "description": "Request permission before making any changes"
+        },
+        {
+          "value": "code",
+          "name": "Code",
+          "description": "Write and modify code with full tool access"
+        }
+      ]
+    }
+  ]
+}
