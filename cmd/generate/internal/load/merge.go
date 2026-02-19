@@ -66,6 +66,11 @@ func MergeStableAndUnstable(stableMeta *Meta, stableSchema *Schema, unstableMeta
 		dupMap[name] = "Unstable" + name
 	}
 
+	overlaySet, err := buildStableOverlaySet(stableSchema, unstableSchema, stableWires)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	combinedSchema := &Schema{Defs: make(map[string]*Definition, len(stableSchema.Defs)+len(dupSet))}
 	for name, def := range stableSchema.Defs {
 		combinedSchema.Defs[name] = def
@@ -89,6 +94,14 @@ func MergeStableAndUnstable(stableMeta *Meta, stableSchema *Schema, unstableMeta
 			}
 		}
 		combinedSchema.Defs[newName] = copyDef
+	}
+
+	for name := range overlaySet {
+		unstableDef := unstableSchema.Defs[name]
+		if unstableDef == nil {
+			return nil, nil, fmt.Errorf("cannot overlay unstable schema: missing definition %q", name)
+		}
+		combinedSchema.Defs[name] = deepCopyDefinition(unstableDef)
 	}
 
 	return combinedMeta, combinedSchema, nil
@@ -201,6 +214,104 @@ func buildUnstableDuplicateSet(stableSchema *Schema, unstableSchema *Schema, uns
 	}
 
 	return dupSet, nil
+}
+
+func buildStableOverlaySet(stableSchema *Schema, unstableSchema *Schema, stableWires map[string]struct{}) (map[string]struct{}, error) {
+	if stableSchema == nil {
+		return nil, fmt.Errorf("stable schema is nil")
+	}
+	if unstableSchema == nil {
+		return nil, fmt.Errorf("unstable schema is nil")
+	}
+
+	stableReachable, err := collectStableReachableDefs(stableSchema, stableWires)
+	if err != nil {
+		return nil, err
+	}
+
+	overlaySet := map[string]struct{}{}
+	queue := []string{}
+	for name := range stableReachable {
+		sdef := stableSchema.Defs[name]
+		udef := unstableSchema.Defs[name]
+		if sdef == nil || udef == nil {
+			continue
+		}
+		if reflect.DeepEqual(sdef, udef) {
+			continue
+		}
+		overlaySet[name] = struct{}{}
+		queue = append(queue, name)
+	}
+
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		def := unstableSchema.Defs[name]
+		if def == nil {
+			return nil, fmt.Errorf("unstable schema missing definition %q", name)
+		}
+		for refName := range collectDefinitionRefs(def) {
+			sdef := stableSchema.Defs[refName]
+			udef := unstableSchema.Defs[refName]
+			if udef == nil {
+				continue
+			}
+			if sdef != nil && reflect.DeepEqual(sdef, udef) {
+				continue
+			}
+			if _, ok := overlaySet[refName]; ok {
+				continue
+			}
+			overlaySet[refName] = struct{}{}
+			queue = append(queue, refName)
+		}
+	}
+
+	return overlaySet, nil
+}
+
+func collectStableReachableDefs(stableSchema *Schema, stableWires map[string]struct{}) (map[string]struct{}, error) {
+	if stableSchema == nil {
+		return nil, fmt.Errorf("stable schema is nil")
+	}
+
+	reachable := map[string]struct{}{}
+	queue := []string{}
+	for name, def := range stableSchema.Defs {
+		if def == nil {
+			continue
+		}
+		if def.XMethod == "" || def.XSide == "" {
+			continue
+		}
+		if _, ok := stableWires[def.XMethod]; !ok {
+			continue
+		}
+		reachable[name] = struct{}{}
+		queue = append(queue, name)
+	}
+
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		def := stableSchema.Defs[name]
+		if def == nil {
+			return nil, fmt.Errorf("stable schema missing definition %q", name)
+		}
+		for refName := range collectDefinitionRefs(def) {
+			if _, ok := stableSchema.Defs[refName]; !ok {
+				continue
+			}
+			if _, ok := reachable[refName]; ok {
+				continue
+			}
+			reachable[refName] = struct{}{}
+			queue = append(queue, refName)
+		}
+	}
+
+	return reachable, nil
 }
 
 func collectDefinitionRefs(root *Definition) map[string]struct{} {

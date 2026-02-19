@@ -229,4 +229,61 @@ func TestMergeStableAndUnstable(t *testing.T) {
 			t.Fatalf("expected stable meta to remain unchanged; got %q", got)
 		}
 	})
+
+	t.Run("changed stable-reachable defs are overlaid with unstable shape", func(t *testing.T) {
+		stableMeta := &Meta{Version: 1, AgentMethods: map[string]string{"initialize": "initialize"}}
+		stableSchema := &Schema{Defs: map[string]*Definition{
+			"InitializeResponse": {
+				Type:    "object",
+				XMethod: "initialize",
+				XSide:   "agent",
+				Properties: map[string]*Definition{
+					"sessionCapabilities": ref("SessionCapabilities"),
+				},
+			},
+			"SessionCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"_meta": {Type: []any{"object", "null"}},
+				},
+			},
+		}}
+		unstableMeta := &Meta{Version: 1, AgentMethods: map[string]string{"initialize": "initialize"}}
+		unstableSchema := &Schema{Defs: map[string]*Definition{
+			"InitializeResponse": {
+				Type:    "object",
+				XMethod: "initialize",
+				XSide:   "agent",
+				Properties: map[string]*Definition{
+					"sessionCapabilities": ref("SessionCapabilities"),
+				},
+			},
+			"SessionCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"_meta": {Type: []any{"object", "null"}},
+					"fork":  ref("SessionForkCapabilities"),
+				},
+			},
+			"SessionForkCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"_meta": {Type: []any{"object", "null"}},
+				},
+			},
+		}}
+
+		_, combinedSchema := mustMerge(t, stableMeta, stableSchema, unstableMeta, unstableSchema)
+
+		sc := combinedSchema.Defs["SessionCapabilities"]
+		if sc == nil || sc.Properties == nil || sc.Properties["fork"] == nil {
+			t.Fatalf("expected SessionCapabilities.fork to be present after overlay")
+		}
+		if got := sc.Properties["fork"].Ref; got != "#/$defs/SessionForkCapabilities" {
+			t.Fatalf("expected SessionCapabilities.fork to reference SessionForkCapabilities; got %q", got)
+		}
+		if combinedSchema.Defs["SessionForkCapabilities"] == nil {
+			t.Fatalf("expected SessionForkCapabilities definition to be present after overlay")
+		}
+	})
 }
