@@ -358,4 +358,12 @@ func TestJSONGolden_MethodPayloads(t *testing.T) {
 		return RequestPermissionResponse{Outcome: RequestPermissionOutcome{Selected: &RequestPermissionOutcomeSelected{Outcome: "selected", OptionId: "allow-once"}}}
 	}))
 	t.Run("cancel_notification", runGolden(func() CancelNotification { return CancelNotification{SessionId: "sess_abc123def456"} }))
+	t.Run("session_capabilities_with_unstable", runGolden(func() SessionCapabilities {
+		return SessionCapabilities{
+			Meta:   map[string]any{"version": "1.0"},
+			Fork:   &SessionForkCapabilities{},
+			List:   &SessionListCapabilities{},
+			Resume: &SessionResumeCapabilities{},
+		}
+	}))
 }

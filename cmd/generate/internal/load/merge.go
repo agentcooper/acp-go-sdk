@@ -91,6 +91,8 @@ func MergeStableAndUnstable(stableMeta *Meta, stableSchema *Schema, unstableMeta
 		combinedSchema.Defs[newName] = copyDef
 	}
 
+	augmentChangedStableTypes(combinedSchema, stableSchema, unstableSchema, dupSet, dupMap)
+
 	return combinedMeta, combinedSchema, nil
 }
 
@@ -266,6 +268,73 @@ func visitDefinition(root *Definition, fn func(*Definition)) {
 		}
 	}
 	walk(root)
+}
+
+// augmentChangedStableTypes replaces stable definitions in combinedSchema with
+// unstable versions when the unstable schema adds new properties to a type that
+// exists in both schemas but is not in dupSet (i.e., not an RPC root type that
+// gets the Unstable prefix). It also transitively adds any newly-referenced
+// types that are missing from the combined schema.
+func augmentChangedStableTypes(combinedSchema *Schema, stableSchema *Schema, unstableSchema *Schema, dupSet map[string]struct{}, dupMap map[string]string) {
+	for name, unstableDef := range unstableSchema.Defs {
+		if _, inDupSet := dupSet[name]; inDupSet {
+			continue
+		}
+		stableDef := stableSchema.Defs[name]
+		if stableDef == nil {
+			continue
+		}
+		if reflect.DeepEqual(stableDef, unstableDef) {
+			continue
+		}
+		// This type exists in both schemas and differs. Replace the stable
+		// version with a deep copy of the unstable version.
+		copyDef := deepCopyDefinition(unstableDef)
+		rewriteDefinitionRefs(copyDef, dupMap)
+		combinedSchema.Defs[name] = copyDef
+
+		// Transitively add any newly-referenced types that are missing.
+		addMissingTransitiveRefs(combinedSchema, unstableSchema, dupSet, dupMap, name)
+	}
+}
+
+// addMissingTransitiveRefs walks the definition tree starting at seedName and
+// copies any referenced types from unstableSchema that are missing from
+// combinedSchema.
+func addMissingTransitiveRefs(combinedSchema *Schema, unstableSchema *Schema, dupSet map[string]struct{}, dupMap map[string]string, seedName string) {
+	queue := []string{seedName}
+	visited := map[string]struct{}{seedName: {}}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		def := combinedSchema.Defs[current]
+		if def == nil {
+			continue
+		}
+		for refName := range collectDefinitionRefs(def) {
+			if _, seen := visited[refName]; seen {
+				continue
+			}
+			visited[refName] = struct{}{}
+			// Skip types already handled by the dupSet/Unstable-prefix mechanism.
+			if _, inDupSet := dupSet[refName]; inDupSet {
+				continue
+			}
+			if _, exists := combinedSchema.Defs[refName]; exists {
+				continue
+			}
+			unstableDef := unstableSchema.Defs[refName]
+			if unstableDef == nil {
+				continue
+			}
+			copyDef := deepCopyDefinition(unstableDef)
+			rewriteDefinitionRefs(copyDef, dupMap)
+			combinedSchema.Defs[refName] = copyDef
+			queue = append(queue, refName)
+		}
+	}
 }
 
 func deepCopyDefinition(d *Definition) *Definition {

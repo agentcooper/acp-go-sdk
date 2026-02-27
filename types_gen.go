@@ -1068,6 +1068,18 @@ type ContentChunk struct {
 	Content ContentBlock `json:"content"`
 }
 
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Cost information for a session.
+type Cost struct {
+	// Total cumulative cost for session.
+	Amount float64 `json:"amount"`
+	// ISO 4217 currency code (e.g., "USD", "EUR").
+	Currency string `json:"currency"`
+}
+
 // Request to create a new terminal and execute a command.
 type CreateTerminalRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -1312,6 +1324,14 @@ type ErrorCodeInvalidParams struct{}
 // Reserved for implementation-defined server errors.
 type ErrorCodeInternalError struct{}
 
+// **Request cancelled**: **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Execution of the method was aborted either due to a cancellation request from the caller or
+// because of resource constraints or shutdown.
+type ErrorCodeRequestCancelled struct{}
+
 // **Authentication required**: Authentication is required before this operation can be performed.
 type ErrorCodeAuthenticationRequired struct{}
 
@@ -1334,6 +1354,13 @@ type ErrorCode struct {
 	// **Internal error**: Internal JSON-RPC error.
 	// Reserved for implementation-defined server errors.
 	InternalError *ErrorCodeInternalError `json:"-"`
+	// **Request cancelled**: **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Execution of the method was aborted either due to a cancellation request from the caller or
+	// because of resource constraints or shutdown.
+	RequestCancelled *ErrorCodeRequestCancelled `json:"-"`
 	// **Authentication required**: Authentication is required before this operation can be performed.
 	AuthenticationRequired *ErrorCodeAuthenticationRequired `json:"-"`
 	// **Resource not found**: A given resource, such as a file, was not found.
@@ -1382,6 +1409,13 @@ func (u *ErrorCode) UnmarshalJSON(b []byte) error {
 		var v ErrorCodeInternalError
 		if json.Unmarshal(b, &v) == nil {
 			u.InternalError = &v
+			return nil
+		}
+	}
+	{
+		var v ErrorCodeRequestCancelled
+		if json.Unmarshal(b, &v) == nil {
+			u.RequestCancelled = &v
 			return nil
 		}
 	}
@@ -1456,6 +1490,17 @@ func (u ErrorCode) MarshalJSON() ([]byte, error) {
 	if u.InternalError != nil {
 		var m map[string]any
 		_b, _e := json.Marshal(*u.InternalError)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	if u.RequestCancelled != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.RequestCancelled)
 		if _e != nil {
 			return []byte{}, _e
 		}
@@ -1830,6 +1875,12 @@ type LoadSessionResponse struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// Initial session configuration options if supported by the Agent.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Initial model state if supported by the Agent
+	Models *UnstableSessionModelState `json:"models,omitempty"`
 	// Initial mode state if supported by the Agent
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
@@ -2199,6 +2250,12 @@ type NewSessionResponse struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// Initial session configuration options if supported by the Agent.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Initial model state if supported by the Agent
+	Models *UnstableSessionModelState `json:"models,omitempty"`
 	// Initial mode state if supported by the Agent
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
@@ -2435,6 +2492,12 @@ type PromptResponse struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// Indicates why the agent stopped processing the turn.
 	StopReason StopReason `json:"stopReason"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Token usage for this turn (optional).
+	Usage *Usage `json:"usage,omitempty"`
 }
 
 func (v *PromptResponse) Validate() error {
@@ -2866,6 +2929,24 @@ type SessionCapabilities struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Whether the agent supports 'session/fork'.
+	Fork *SessionForkCapabilities `json:"fork,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Whether the agent supports 'session/list'.
+	List *SessionListCapabilities `json:"list,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Whether the agent supports 'session/resume'.
+	Resume *SessionResumeCapabilities `json:"resume,omitempty"`
 }
 
 // Unique identifier for a session configuration option value group.
@@ -3125,6 +3206,22 @@ func (u SessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
 // Unique identifier for a session configuration option value.
 type SessionConfigValueId string
 
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Capabilities for the 'session/fork' method.
+//
+// By supplying '{}' it means that the agent supports forking of sessions.
+type SessionForkCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+}
+
 // A unique identifier for a conversation session between a client and agent.
 //
 // Sessions maintain their own context, conversation history, and state,
@@ -3132,6 +3229,37 @@ type SessionConfigValueId string
 //
 // See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)
 type SessionId string
+
+// Update to session metadata. All fields are optional to support partial updates.
+//
+// Agents send this notification to update session information like title or custom metadata.
+// This allows clients to display dynamic session names and track session state changes.
+type SessionInfoUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Human-readable title for the session. Set to null to clear.
+	Title *string `json:"title,omitempty"`
+	// ISO 8601 timestamp of last activity. Set to null to clear.
+	UpdatedAt *string `json:"updatedAt,omitempty"`
+}
+
+// Capabilities for the 'session/list' method.
+//
+// By supplying '{}' it means that the agent supports listing of sessions.
+//
+// Further capabilities can be added in the future for other means of filtering or searching the list.
+type SessionListCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+}
 
 // A mode the agent can operate in.
 //
@@ -3185,6 +3313,22 @@ type SessionNotification struct {
 
 func (v *SessionNotification) Validate() error {
 	return nil
+}
+
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Capabilities for the 'session/resume' method.
+//
+// By supplying '{}' it means that the agent supports resuming of sessions.
+type SessionResumeCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
 }
 
 // Different types of updates that can be sent during session processing.
@@ -3345,6 +3489,42 @@ type SessionConfigOptionUpdate struct {
 	SessionUpdate string                `json:"sessionUpdate"`
 }
 
+// Session metadata has been updated (title, timestamps, custom metadata)
+type SessionSessionInfoUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta          map[string]any `json:"_meta,omitempty"`
+	SessionUpdate string         `json:"sessionUpdate"`
+	// Human-readable title for the session. Set to null to clear.
+	Title *string `json:"title,omitempty"`
+	// ISO 8601 timestamp of last activity. Set to null to clear.
+	UpdatedAt *string `json:"updatedAt,omitempty"`
+}
+
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Context window and cost update for the session.
+type SessionUsageUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Cumulative session cost (optional).
+	Cost          *Cost  `json:"cost,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"`
+	// Total context window size in tokens.
+	Size int `json:"size"`
+	// Tokens currently in context.
+	Used int `json:"used"`
+}
+
 type SessionUpdate struct {
 	// A chunk of the user's message being streamed.
 	UserMessageChunk *SessionUpdateUserMessageChunk `json:"-"`
@@ -3367,6 +3547,14 @@ type SessionUpdate struct {
 	CurrentModeUpdate *SessionCurrentModeUpdate `json:"-"`
 	// Session configuration options have been updated.
 	ConfigOptionUpdate *SessionConfigOptionUpdate `json:"-"`
+	// Session metadata has been updated (title, timestamps, custom metadata)
+	SessionInfoUpdate *SessionSessionInfoUpdate `json:"-"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// Context window and cost update for the session.
+	UsageUpdate *SessionUsageUpdate `json:"-"`
 }
 
 func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
@@ -3440,6 +3628,20 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 					return errors.New("invalid variant payload")
 				}
 				u.ConfigOptionUpdate = &v
+				return nil
+			case "session_info_update":
+				var v SessionSessionInfoUpdate
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.SessionInfoUpdate = &v
+				return nil
+			case "usage_update":
+				var v SessionUsageUpdate
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.UsageUpdate = &v
 				return nil
 			}
 		}
@@ -3599,6 +3801,40 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 				return nil
 			}
 		}
+		{
+			var v SessionSessionInfoUpdate
+			var match bool = true
+			if _, ok := m["sessionUpdate"]; !ok {
+				match = false
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.SessionInfoUpdate = &v
+				return nil
+			}
+		}
+		{
+			var v SessionUsageUpdate
+			var match bool = true
+			if _, ok := m["sessionUpdate"]; !ok {
+				match = false
+			}
+			if _, ok := m["used"]; !ok {
+				match = false
+			}
+			if _, ok := m["size"]; !ok {
+				match = false
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.UsageUpdate = &v
+				return nil
+			}
+		}
 	} else {
 		if _, ok := err.(*json.UnmarshalTypeError); !ok {
 			return err
@@ -3664,6 +3900,20 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 		var v SessionConfigOptionUpdate
 		if json.Unmarshal(b, &v) == nil {
 			u.ConfigOptionUpdate = &v
+			return nil
+		}
+	}
+	{
+		var v SessionSessionInfoUpdate
+		if json.Unmarshal(b, &v) == nil {
+			u.SessionInfoUpdate = &v
+			return nil
+		}
+	}
+	{
+		var v SessionUsageUpdate
+		if json.Unmarshal(b, &v) == nil {
+			u.UsageUpdate = &v
 			return nil
 		}
 	}
@@ -3778,6 +4028,30 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 		m["sessionUpdate"] = "config_option_update"
 		return json.Marshal(m)
 	}
+	if u.SessionInfoUpdate != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.SessionInfoUpdate)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = "session_info_update"
+		return json.Marshal(m)
+	}
+	if u.UsageUpdate != nil {
+		var m map[string]any
+		_b, _e := json.Marshal(*u.UsageUpdate)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = "usage_update"
+		return json.Marshal(m)
+	}
 	return []byte{}, nil
 }
 
@@ -3808,6 +4082,12 @@ func (u *SessionUpdate) Validate() error {
 		count++
 	}
 	if u.ConfigOptionUpdate != nil {
+		count++
+	}
+	if u.SessionInfoUpdate != nil {
+		count++
+	}
+	if u.UsageUpdate != nil {
 		count++
 	}
 	if count != 1 {
@@ -4672,6 +4952,46 @@ type UnstructuredCommandInput struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// A hint to display when the input hasn't been provided yet
 	Hint string `json:"hint"`
+}
+
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Token usage information for a prompt turn.
+type Usage struct {
+	// Total cache read tokens.
+	CachedReadTokens *int `json:"cachedReadTokens,omitempty"`
+	// Total cache write tokens.
+	CachedWriteTokens *int `json:"cachedWriteTokens,omitempty"`
+	// Total input tokens across all turns.
+	InputTokens int `json:"inputTokens"`
+	// Total output tokens across all turns.
+	OutputTokens int `json:"outputTokens"`
+	// Total thought/reasoning tokens
+	ThoughtTokens *int `json:"thoughtTokens,omitempty"`
+	// Sum of all token types across session.
+	TotalTokens int `json:"totalTokens"`
+}
+
+// **UNSTABLE**
+//
+// This capability is not part of the spec yet, and may be removed or changed at any point.
+//
+// Context window and cost update for a session.
+type UsageUpdate struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Cumulative session cost (optional).
+	Cost *Cost `json:"cost,omitempty"`
+	// Total context window size in tokens.
+	Size int `json:"size"`
+	// Tokens currently in context.
+	Used int `json:"used"`
 }
 
 // Request to wait for a terminal command to exit.

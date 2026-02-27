@@ -187,6 +187,74 @@ func TestMergeStableAndUnstable(t *testing.T) {
 		}
 	})
 
+	t.Run("augments stable type with additional unstable properties", func(t *testing.T) {
+		stableMeta := &Meta{Version: 1}
+		stableSchema := &Schema{Defs: map[string]*Definition{
+			"SessionCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"_meta": {Type: "object"},
+				},
+			},
+			"AgentCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"session": ref("SessionCapabilities"),
+				},
+			},
+		}}
+
+		unstableMeta := &Meta{Version: 1}
+		unstableSchema := &Schema{Defs: map[string]*Definition{
+			"SessionCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"_meta":  {Type: "object"},
+					"fork":   ref("SessionForkCapabilities"),
+					"list":   ref("SessionListCapabilities"),
+					"resume": ref("SessionResumeCapabilities"),
+				},
+			},
+			"SessionForkCapabilities":   {Type: "object", Description: "fork caps"},
+			"SessionListCapabilities":   {Type: "object", Description: "list caps"},
+			"SessionResumeCapabilities": {Type: "object", Description: "resume caps"},
+			"AgentCapabilities": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"session": ref("SessionCapabilities"),
+				},
+			},
+		}}
+
+		// Save original stable description to verify no mutation.
+		origStableProps := len(stableSchema.Defs["SessionCapabilities"].Properties)
+
+		_, combinedSchema := mustMerge(t, stableMeta, stableSchema, unstableMeta, unstableSchema)
+
+		// The combined SessionCapabilities should have the unstable properties.
+		sessCaps := combinedSchema.Defs["SessionCapabilities"]
+		if sessCaps == nil {
+			t.Fatal("expected SessionCapabilities in combined schema")
+		}
+		for _, prop := range []string{"_meta", "fork", "list", "resume"} {
+			if sessCaps.Properties[prop] == nil {
+				t.Fatalf("expected SessionCapabilities to have %q property", prop)
+			}
+		}
+
+		// Newly-referenced types should be added.
+		for _, typeName := range []string{"SessionForkCapabilities", "SessionListCapabilities", "SessionResumeCapabilities"} {
+			if combinedSchema.Defs[typeName] == nil {
+				t.Fatalf("expected %s to be added to combined schema", typeName)
+			}
+		}
+
+		// Original stable schema should not be mutated.
+		if len(stableSchema.Defs["SessionCapabilities"].Properties) != origStableProps {
+			t.Fatal("stable schema was mutated")
+		}
+	})
+
 	t.Run("stable defs are not mutated", func(t *testing.T) {
 		stableMeta := &Meta{Version: 1, AgentMethods: map[string]string{"stable": "stable/method"}}
 		unstableMeta := &Meta{Version: 1, AgentMethods: map[string]string{"foo": "unstable/foo"}}
