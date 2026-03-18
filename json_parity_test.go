@@ -170,6 +170,30 @@ func TestJSONGolden_SessionUpdates(t *testing.T) {
 		},
 		func() SessionUpdate { return UpdateAgentThoughtText("Thinking about best approach...") },
 	))
+	t.Run("session_update_user_message_chunk_with_id", runGolden(
+		func() SessionUpdate {
+			return SessionUpdate{UserMessageChunk: &SessionUpdateUserMessageChunk{Content: TextBlock("What's the capital of France?"), MessageId: Ptr("550e8400-e29b-41d4-a716-446655440000")}}
+		},
+		func() SessionUpdate {
+			return UpdateUserMessageWithID(TextBlock("What's the capital of France?"), "550e8400-e29b-41d4-a716-446655440000")
+		},
+	))
+	t.Run("session_update_agent_message_chunk_with_id", runGolden(
+		func() SessionUpdate {
+			return SessionUpdate{AgentMessageChunk: &SessionUpdateAgentMessageChunk{Content: TextBlock("The capital of France is Paris."), MessageId: Ptr("550e8400-e29b-41d4-a716-446655440001")}}
+		},
+		func() SessionUpdate {
+			return UpdateAgentMessageWithID(TextBlock("The capital of France is Paris."), "550e8400-e29b-41d4-a716-446655440001")
+		},
+	))
+	t.Run("session_update_agent_thought_chunk_with_id", runGolden(
+		func() SessionUpdate {
+			return SessionUpdate{AgentThoughtChunk: &SessionUpdateAgentThoughtChunk{Content: TextBlock("Thinking about best approach..."), MessageId: Ptr("550e8400-e29b-41d4-a716-446655440002")}}
+		},
+		func() SessionUpdate {
+			return UpdateAgentThoughtWithID(TextBlock("Thinking about best approach..."), "550e8400-e29b-41d4-a716-446655440002")
+		},
+	))
 	t.Run("session_update_plan", runGolden(
 		func() SessionUpdate {
 			return SessionUpdate{Plan: &SessionUpdatePlan{Entries: []PlanEntry{{Content: "Check for syntax errors", Priority: PlanEntryPriorityHigh, Status: PlanEntryStatusPending}, {Content: "Identify potential type issues", Priority: PlanEntryPriorityMedium, Status: PlanEntryStatusPending}}}}
@@ -340,6 +364,12 @@ func TestJSONGolden_MethodPayloads(t *testing.T) {
 	t.Run("new_session_response", runGolden(func() NewSessionResponse { return NewSessionResponse{SessionId: "sess_abc123def456"} }))
 	t.Run("prompt_request", runGolden(func() PromptRequest {
 		return PromptRequest{SessionId: "sess_abc123def456", Prompt: []ContentBlock{TextBlock("Can you analyze this code for potential issues?"), ResourceBlock(EmbeddedResourceResource{TextResourceContents: &TextResourceContents{Uri: "file:///home/user/project/main.py", MimeType: Ptr("text/x-python"), Text: "def process_data(items):\n    for item in items:\n        print(item)"}})}}
+	}))
+	t.Run("prompt_request_with_message_id", runGolden(func() PromptRequest {
+		return PromptRequest{SessionId: "sess_abc123def456", Prompt: []ContentBlock{TextBlock("Can you analyze this code?")}, MessageId: Ptr("550e8400-e29b-41d4-a716-446655440000")}
+	}))
+	t.Run("prompt_response_with_user_message_id", runGolden(func() PromptResponse {
+		return PromptResponse{StopReason: StopReasonEndTurn, UserMessageId: Ptr("550e8400-e29b-41d4-a716-446655440000")}
 	}))
 	t.Run("fs_read_text_file_request", runGolden(func() ReadTextFileRequest {
 		line, limit := 10, 50
