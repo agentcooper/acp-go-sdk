@@ -1008,6 +1008,11 @@
             }
           ],
           "description": "A single item of content"
+        },
+        "messageId": {
+          "description": "**UNSTABLE**\n\nThis capability is not part of the spec yet, and may be removed or changed at any point.\n\nA unique UUID identifying the message this chunk belongs to.\n\nAll chunks belonging to the same logical message share the same messageId,\nenabling reliable message boundary detection.",
+          "format": "uuid",
+          "type": ["string", "null"]
         }
       },
       "required": ["content"],
@@ -2204,6 +2209,11 @@
           "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
           "type": ["object", "null"]
         },
+        "messageId": {
+          "description": "**UNSTABLE**\n\nThis capability is not part of the spec yet, and may be removed or changed at any point.\n\nA client-generated UUID identifying this user message.\n\nWhen provided, the agent SHOULD echo this value back as `userMessageId`\nin the PromptResponse, and MAY use it to tag session update chunks\nbelonging to this message.",
+          "format": "uuid",
+          "type": ["string", "null"]
+        },
         "prompt": {
           "description": "The blocks of content that compose the user's message.\n\nAs a baseline, the Agent MUST support [`ContentBlock::Text`] and [`ContentBlock::ResourceLink`],\nwhile other variants are optionally enabled via [`PromptCapabilities`].\n\nThe Client MUST adapt its interface according to [`PromptCapabilities`].\n\nThe client MAY include referenced pieces of context as either\n[`ContentBlock::Resource`] or [`ContentBlock::ResourceLink`].\n\nWhen available, [`ContentBlock::Resource`] is preferred\nas it avoids extra round-trips and allows the message to include\npieces of context from sources the agent may not have access to.",
           "items": {
@@ -2251,6 +2261,11 @@
             }
           ],
           "description": "**UNSTABLE**\n\nThis capability is not part of the spec yet, and may be removed or changed at any point.\n\nToken usage for this turn (optional)."
+        },
+        "userMessageId": {
+          "description": "**UNSTABLE**\n\nThis capability is not part of the spec yet, and may be removed or changed at any point.\n\nThe UUID of the user message that triggered this response.\n\nEchoed from the `messageId` in the PromptRequest when provided by the client,\nor assigned by the agent if the client did not provide one.\nIts presence indicates the agent recorded the message ID.",
+          "format": "uuid",
+          "type": ["string", "null"]
         }
       },
       "required": ["stopReason"],

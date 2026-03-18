@@ -1066,6 +1066,15 @@ type ContentChunk struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// A single item of content
 	Content ContentBlock `json:"content"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// A unique UUID identifying the message this chunk belongs to.
+	//
+	// All chunks belonging to the same logical message share the same messageId,
+	// enabling reliable message boundary detection.
+	MessageId *string `json:"messageId,omitempty"`
 }
 
 // **UNSTABLE**
@@ -2455,6 +2464,16 @@ type PromptRequest struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// A client-generated UUID identifying this user message.
+	//
+	// When provided, the agent SHOULD echo this value back as 'userMessageId'
+	// in the PromptResponse, and MAY use it to tag session update chunks
+	// belonging to this message.
+	MessageId *string `json:"messageId,omitempty"`
 	// The blocks of content that compose the user's message.
 	//
 	// As a baseline, the Agent MUST support ['ContentBlock::Text'] and ['ContentBlock::ResourceLink'],
@@ -2498,6 +2517,16 @@ type PromptResponse struct {
 	//
 	// Token usage for this turn (optional).
 	Usage *Usage `json:"usage,omitempty"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// The UUID of the user message that triggered this response.
+	//
+	// Echoed from the 'messageId' in the PromptRequest when provided by the client,
+	// or assigned by the agent if the client did not provide one.
+	// Its presence indicates the agent recorded the message ID.
+	UserMessageId *string `json:"userMessageId,omitempty"`
 }
 
 func (v *PromptResponse) Validate() error {
@@ -3345,8 +3374,17 @@ type SessionUpdateUserMessageChunk struct {
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
 	// A single item of content
-	Content       ContentBlock `json:"content"`
-	SessionUpdate string       `json:"sessionUpdate"`
+	Content ContentBlock `json:"content"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// A unique UUID identifying the message this chunk belongs to.
+	//
+	// All chunks belonging to the same logical message share the same messageId,
+	// enabling reliable message boundary detection.
+	MessageId     *string `json:"messageId,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
 }
 
 // A chunk of the agent's response being streamed.
@@ -3358,8 +3396,17 @@ type SessionUpdateAgentMessageChunk struct {
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
 	// A single item of content
-	Content       ContentBlock `json:"content"`
-	SessionUpdate string       `json:"sessionUpdate"`
+	Content ContentBlock `json:"content"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// A unique UUID identifying the message this chunk belongs to.
+	//
+	// All chunks belonging to the same logical message share the same messageId,
+	// enabling reliable message boundary detection.
+	MessageId     *string `json:"messageId,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
 }
 
 // A chunk of the agent's internal reasoning being streamed.
@@ -3371,8 +3418,17 @@ type SessionUpdateAgentThoughtChunk struct {
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
 	// A single item of content
-	Content       ContentBlock `json:"content"`
-	SessionUpdate string       `json:"sessionUpdate"`
+	Content ContentBlock `json:"content"`
+	// **UNSTABLE**
+	//
+	// This capability is not part of the spec yet, and may be removed or changed at any point.
+	//
+	// A unique UUID identifying the message this chunk belongs to.
+	//
+	// All chunks belonging to the same logical message share the same messageId,
+	// enabling reliable message boundary detection.
+	MessageId     *string `json:"messageId,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
 }
 
 // Notification that a new tool call has been initiated.

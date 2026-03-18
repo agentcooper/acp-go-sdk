@@ -88,6 +88,11 @@ func UpdateUserMessageText(text string) SessionUpdate {
 	return UpdateUserMessage(TextBlock(text))
 }
 
+// UpdateUserMessageWithID constructs a user_message_chunk update with a message ID.
+func UpdateUserMessageWithID(content ContentBlock, messageId string) SessionUpdate {
+	return SessionUpdate{UserMessageChunk: &SessionUpdateUserMessageChunk{Content: content, MessageId: &messageId}}
+}
+
 // UpdateAgentMessage constructs an agent_message_chunk update with the given content.
 func UpdateAgentMessage(content ContentBlock) SessionUpdate {
 	return SessionUpdate{AgentMessageChunk: &SessionUpdateAgentMessageChunk{Content: content}}
@@ -98,6 +103,11 @@ func UpdateAgentMessageText(text string) SessionUpdate {
 	return UpdateAgentMessage(TextBlock(text))
 }
 
+// UpdateAgentMessageWithID constructs an agent_message_chunk update with a message ID.
+func UpdateAgentMessageWithID(content ContentBlock, messageId string) SessionUpdate {
+	return SessionUpdate{AgentMessageChunk: &SessionUpdateAgentMessageChunk{Content: content, MessageId: &messageId}}
+}
+
 // UpdateAgentThought constructs an agent_thought_chunk update with the given content.
 func UpdateAgentThought(content ContentBlock) SessionUpdate {
 	return SessionUpdate{AgentThoughtChunk: &SessionUpdateAgentThoughtChunk{Content: content}}
@@ -106,6 +116,11 @@ func UpdateAgentThought(content ContentBlock) SessionUpdate {
 // UpdateAgentThoughtText constructs an agent_thought_chunk update from text.
 func UpdateAgentThoughtText(text string) SessionUpdate {
 	return UpdateAgentThought(TextBlock(text))
+}
+
+// UpdateAgentThoughtWithID constructs an agent_thought_chunk update with a message ID.
+func UpdateAgentThoughtWithID(content ContentBlock, messageId string) SessionUpdate {
+	return SessionUpdate{AgentThoughtChunk: &SessionUpdateAgentThoughtChunk{Content: content, MessageId: &messageId}}
 }
 
 // UpdatePlan constructs a plan update with the provided entries.
