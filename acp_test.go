@@ -232,6 +232,84 @@ func (a agentFuncs) HandleExtensionMethod(ctx context.Context, method string, pa
 	return nil, NewMethodNotFound(method)
 }
 
+type forkOnlyUnstableAgent struct {
+	called bool
+}
+
+func (a *forkOnlyUnstableAgent) Authenticate(context.Context, AuthenticateRequest) (AuthenticateResponse, error) {
+	return AuthenticateResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) Initialize(context.Context, InitializeRequest) (InitializeResponse, error) {
+	return InitializeResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) Cancel(context.Context, CancelNotification) error {
+	return nil
+}
+
+func (a *forkOnlyUnstableAgent) NewSession(context.Context, NewSessionRequest) (NewSessionResponse, error) {
+	return NewSessionResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) Prompt(context.Context, PromptRequest) (PromptResponse, error) {
+	return PromptResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) SetSessionMode(context.Context, SetSessionModeRequest) (SetSessionModeResponse, error) {
+	return SetSessionModeResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) SetSessionConfigOption(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
+	return SetSessionConfigOptionResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) UnstableForkSession(context.Context, UnstableForkSessionRequest) (UnstableForkSessionResponse, error) {
+	a.called = true
+	return UnstableForkSessionResponse{SessionId: "forked-session"}, nil
+}
+
+func (a *forkOnlyUnstableAgent) UnstableListSessions(context.Context, UnstableListSessionsRequest) (UnstableListSessionsResponse, error) {
+	return UnstableListSessionsResponse{}, NewMethodNotFound(AgentMethodSessionList)
+}
+
+func (a *forkOnlyUnstableAgent) UnstableResumeSession(context.Context, UnstableResumeSessionRequest) (UnstableResumeSessionResponse, error) {
+	return UnstableResumeSessionResponse{}, NewMethodNotFound(AgentMethodSessionResume)
+}
+
+func (a *forkOnlyUnstableAgent) UnstableSetSessionModel(context.Context, UnstableSetSessionModelRequest) (UnstableSetSessionModelResponse, error) {
+	return UnstableSetSessionModelResponse{}, NewMethodNotFound(AgentMethodSessionSetModel)
+}
+
+func TestAgentDispatch_AllowsPartialUnstableMethodImplementation(t *testing.T) {
+	agent := &forkOnlyUnstableAgent{}
+	conn := &AgentSideConnection{
+		agent:          agent,
+		sessionCancels: make(map[string]context.CancelFunc),
+	}
+
+	params, err := json.Marshal(UnstableForkSessionRequest{Cwd: "/tmp", SessionId: "source-session"})
+	if err != nil {
+		t.Fatalf("marshal request params: %v", err)
+	}
+
+	result, reqErr := conn.handle(context.Background(), AgentMethodSessionFork, params)
+	if reqErr != nil {
+		t.Fatalf("unexpected request error: %+v", reqErr)
+	}
+	if !agent.called {
+		t.Fatal("expected UnstableForkSession method to be invoked")
+	}
+
+	resp, ok := result.(UnstableForkSessionResponse)
+	if !ok {
+		t.Fatalf("expected UnstableForkSessionResponse, got %T", result)
+	}
+	if resp.SessionId != "forked-session" {
+		t.Fatalf("unexpected response session id: %q", resp.SessionId)
+	}
+}
+
 // Test bidirectional error handling similar to typescript/acp.test.ts
 func TestConnectionHandlesErrorsBidirectional(t *testing.T) {
 	ctx := context.Background()
@@ -528,6 +606,166 @@ func TestConnectionHandlesNotifications(t *testing.T) {
 	want1, want2 := "agent message: Hello from agent", "cancelled: test-session"
 	if !slices.Contains(got, want1) || !slices.Contains(got, want2) {
 		t.Fatalf("notification logs mismatch: %v", got)
+	}
+}
+
+func TestConnectionDoesNotCancelInboundContextBeforeDrainingNotificationsOnDisconnect(t *testing.T) {
+	const n = 25
+
+	incomingR, incomingW := io.Pipe()
+
+	var (
+		wg            sync.WaitGroup
+		canceledCount atomic.Int64
+	)
+	wg.Add(n)
+
+	c := NewConnection(func(ctx context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+		defer wg.Done()
+		// Slow down processing so some notifications are handled after the receive
+		// loop observes EOF and signals disconnect.
+		time.Sleep(10 * time.Millisecond)
+		if ctx.Err() != nil {
+			canceledCount.Add(1)
+		}
+		return nil, nil
+	}, io.Discard, incomingR)
+
+	// Write notifications quickly and then close the stream to simulate a peer disconnect.
+	for i := 0; i < n; i++ {
+		if _, err := io.WriteString(incomingW, `{"jsonrpc":"2.0","method":"test/notify","params":{}}`+"\n"); err != nil {
+			t.Fatalf("write notification: %v", err)
+		}
+	}
+	_ = incomingW.Close()
+
+	select {
+	case <-c.Done():
+		// Expected: peer disconnect observed promptly.
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for connection Done()")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timeout waiting for notification handlers")
+	}
+
+	if got := canceledCount.Load(); got != 0 {
+		t.Fatalf("inbound handler context was canceled for %d/%d notifications", got, n)
+	}
+}
+
+func TestConnectionCancelsRequestHandlersOnDisconnectEvenWithNotificationBacklog(t *testing.T) {
+	const numNotifications = 200
+
+	incomingR, incomingW := io.Pipe()
+
+	reqDone := make(chan struct{})
+
+	c := NewConnection(func(ctx context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+		switch method {
+		case "test/notify":
+			// Slow down to create a backlog of queued notifications.
+			time.Sleep(5 * time.Millisecond)
+			return nil, nil
+		case "test/request":
+			// Requests should be canceled promptly on disconnect (uses c.ctx).
+			<-ctx.Done()
+			close(reqDone)
+			return nil, NewInternalError(map[string]any{"error": "canceled"})
+		default:
+			return nil, nil
+		}
+	}, io.Discard, incomingR)
+
+	for i := 0; i < numNotifications; i++ {
+		if _, err := io.WriteString(incomingW, `{"jsonrpc":"2.0","method":"test/notify","params":{}}`+"\n"); err != nil {
+			t.Fatalf("write notification: %v", err)
+		}
+	}
+	if _, err := io.WriteString(incomingW, `{"jsonrpc":"2.0","id":1,"method":"test/request","params":{}}`+"\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	_ = incomingW.Close()
+
+	// Disconnect should be observed quickly.
+	select {
+	case <-c.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for connection Done()")
+	}
+
+	// Even with a big notification backlog, the request handler should be canceled promptly.
+	select {
+	case <-reqDone:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for request handler cancellation")
+	}
+}
+
+func TestConnectionFailsFastOnNotificationQueueOverflow(t *testing.T) {
+	incomingR, incomingW := io.Pipe()
+
+	// Block the first notification handler so the queue can fill deterministically.
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var handled atomic.Int64
+
+	c := NewConnection(func(context.Context, string, json.RawMessage) (any, *RequestError) {
+		if handled.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil, nil
+	}, io.Discard, incomingR)
+
+	if _, err := io.WriteString(incomingW, `{"jsonrpc":"2.0","method":"test/notify","params":{}}`+"\n"); err != nil {
+		t.Fatalf("write first notification: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for first notification handler to start")
+	}
+
+	// Fill the buffered queue, then send one extra notification to force overflow.
+	for i := 0; i < defaultMaxQueuedNotifications+1; i++ {
+		if _, err := io.WriteString(incomingW, `{"jsonrpc":"2.0","method":"test/notify","params":{}}`+"\n"); err != nil {
+			t.Fatalf("write overflow notification %d: %v", i, err)
+		}
+	}
+
+	select {
+	case <-c.Done():
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for connection cancellation on queue overflow")
+	}
+
+	cause := context.Cause(c.ctx)
+	if !errors.Is(cause, errNotificationQueueOverflow) {
+		t.Fatalf("expected overflow cancellation cause, got %v", cause)
+	}
+
+	// Let queued work drain and ensure waitgroup accounting remains balanced.
+	close(releaseFirst)
+
+	drained := make(chan struct{})
+	go func() {
+		c.notificationWg.Wait()
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("notification waitgroup did not drain after overflow")
 	}
 }
 

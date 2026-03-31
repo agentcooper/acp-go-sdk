@@ -11,7 +11,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+const (
+	notificationQueueDrainTimeout = 5 * time.Second
+	defaultMaxQueuedNotifications = 1024
+)
+
+var errNotificationQueueOverflow = errors.New("notification queue overflow")
 
 type anyMessage struct {
 	JSONRPC string           `json:"jsonrpc"`
@@ -38,13 +46,26 @@ type Connection struct {
 	r       io.Reader
 	handler MethodHandler
 
-	mu       sync.Mutex
-	nextID   atomic.Uint64
-	pending  map[string]*pendingResponse
-	inflight map[string]context.CancelCauseFunc
+	mu                   sync.Mutex
+	writeMu              sync.Mutex
+	nextID               atomic.Uint64
+	pending              map[string]*pendingResponse
+	inflight             map[string]context.CancelCauseFunc
+	pendingCancelRequest []string
+	cancelRequestSignal  chan struct{}
 
+	// ctx/cancel govern connection lifetime and are used for Done() and for canceling
+	// callers waiting on responses when the peer disconnects.
 	ctx    context.Context
 	cancel context.CancelCauseFunc
+
+	// inboundCtx/inboundCancel are used when invoking the inbound MethodHandler.
+	// This ctx is intentionally kept alive long enough to process notifications
+	// that were successfully received and queued just before a peer disconnect.
+	// Otherwise, handlers that respect context cancellation may drop end-of-connection
+	// messages that we already read off the wire.
+	inboundCtx    context.Context
+	inboundCancel context.CancelCauseFunc
 
 	logger *slog.Logger
 
@@ -52,22 +73,28 @@ type Connection struct {
 	// for all notifications received before the response to complete processing.
 	notificationWg sync.WaitGroup
 
-	// notificationQueue serializes notification processing to maintain message ordering.
+	// notificationQueue serializes notification processing to maintain order.
+	// It is bounded to keep memory usage predictable.
 	notificationQueue chan *anyMessage
 }
 
 func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader) *Connection {
 	ctx, cancel := context.WithCancelCause(context.Background())
+	inboundCtx, inboundCancel := context.WithCancelCause(context.Background())
 	c := &Connection{
-		w:                 peerInput,
-		r:                 peerOutput,
-		handler:           handler,
-		pending:           make(map[string]*pendingResponse),
-		inflight:          make(map[string]context.CancelCauseFunc),
-		ctx:               ctx,
-		cancel:            cancel,
-		notificationQueue: make(chan *anyMessage, 1000),
+		w:                   peerInput,
+		r:                   peerOutput,
+		handler:             handler,
+		pending:             make(map[string]*pendingResponse),
+		inflight:            make(map[string]context.CancelCauseFunc),
+		cancelRequestSignal: make(chan struct{}, 1),
+		ctx:                 ctx,
+		cancel:              cancel,
+		inboundCtx:          inboundCtx,
+		inboundCancel:       inboundCancel,
+		notificationQueue:   make(chan *anyMessage, defaultMaxQueuedNotifications),
 	}
+	go c.sendCancelRequests()
 	go c.receive()
 	go c.processNotifications()
 	return c
@@ -82,6 +109,238 @@ func (c *Connection) loggerOrDefault() *slog.Logger {
 		return c.logger
 	}
 	return slog.Default()
+}
+
+const (
+	maxCanonicalJSONRPCIDKeyLen   = 4096
+	maxCanonicalJSONRPCIDAbsExp10 = 4096
+	maxPendingCancelRequests      = 1024
+)
+
+var (
+	errInvalidJSONRPCNumericID  = errors.New("invalid json-rpc numeric id")
+	errJSONRPCNumericIDTooLarge = errors.New("json-rpc numeric id too large")
+)
+
+func canonicalJSONRPCIDKey(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", errors.New("empty json-rpc id")
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+
+	var id any
+	if err := dec.Decode(&id); err != nil {
+		return "", err
+	}
+
+	// Ensure the id contains a single JSON value.
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return "", errors.New("invalid json-rpc id: trailing data")
+	} else if !errors.Is(err, io.EOF) {
+		return "", err
+	}
+
+	switch v := id.(type) {
+	case nil:
+		return "null", nil
+	case string:
+		canon, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(canon), nil
+	case json.Number:
+		return canonicalJSONRPCNumericIDKey(v)
+	default:
+		return "", errors.New("json-rpc id must be string, number, or null")
+	}
+}
+
+func canonicalJSONRPCNumericIDKey(v json.Number) (string, error) {
+	raw := strings.TrimSpace(v.String())
+	if raw == "" {
+		return "", errInvalidJSONRPCNumericID
+	}
+
+	negative, digits, exp10, err := parseJSONRPCNumericID(raw)
+	if err != nil {
+		return "", err
+	}
+
+	return formatCanonicalJSONRPCNumericID(negative, digits, exp10)
+}
+
+func parseJSONRPCNumericID(raw string) (negative bool, digits string, exp10 int, err error) {
+	i := 0
+	if raw[i] == '-' {
+		negative = true
+		i++
+		if i >= len(raw) {
+			return false, "", 0, errInvalidJSONRPCNumericID
+		}
+	}
+
+	intStart := i
+	switch {
+	case raw[i] == '0':
+		i++
+		if i < len(raw) && isASCIIDigit(raw[i]) {
+			return false, "", 0, errInvalidJSONRPCNumericID
+		}
+	case raw[i] >= '1' && raw[i] <= '9':
+		for i < len(raw) && isASCIIDigit(raw[i]) {
+			i++
+		}
+	default:
+		return false, "", 0, errInvalidJSONRPCNumericID
+	}
+	intDigits := raw[intStart:i]
+
+	fracDigits := ""
+	if i < len(raw) && raw[i] == '.' {
+		i++
+		fracStart := i
+		for i < len(raw) && isASCIIDigit(raw[i]) {
+			i++
+		}
+		if fracStart == i {
+			return false, "", 0, errInvalidJSONRPCNumericID
+		}
+		fracDigits = raw[fracStart:i]
+	}
+
+	exponent := 0
+	if i < len(raw) && (raw[i] == 'e' || raw[i] == 'E') {
+		i++
+		if i >= len(raw) {
+			return false, "", 0, errInvalidJSONRPCNumericID
+		}
+
+		exponentSign := 1
+		if raw[i] == '+' || raw[i] == '-' {
+			if raw[i] == '-' {
+				exponentSign = -1
+			}
+			i++
+			if i >= len(raw) {
+				return false, "", 0, errInvalidJSONRPCNumericID
+			}
+		}
+
+		exponentStart := i
+		for i < len(raw) && isASCIIDigit(raw[i]) {
+			i++
+		}
+		if exponentStart == i {
+			return false, "", 0, errInvalidJSONRPCNumericID
+		}
+
+		exponentMagnitude, parseErr := parseBoundedInt(raw[exponentStart:i], maxCanonicalJSONRPCIDAbsExp10)
+		if parseErr != nil {
+			return false, "", 0, parseErr
+		}
+		exponent = exponentSign * exponentMagnitude
+	}
+
+	if i != len(raw) {
+		return false, "", 0, errInvalidJSONRPCNumericID
+	}
+
+	digits = strings.TrimLeft(intDigits+fracDigits, "0")
+	if digits == "" {
+		return false, "", 0, nil
+	}
+	if len(digits) > maxCanonicalJSONRPCIDKeyLen {
+		return false, "", 0, errJSONRPCNumericIDTooLarge
+	}
+
+	exp10 = exponent - len(fracDigits)
+	return negative, digits, exp10, nil
+}
+
+func parseBoundedInt(raw string, max int) (int, error) {
+	if raw == "" {
+		return 0, errInvalidJSONRPCNumericID
+	}
+
+	value := 0
+	for i := 0; i < len(raw); i++ {
+		if !isASCIIDigit(raw[i]) {
+			return 0, errInvalidJSONRPCNumericID
+		}
+		digit := int(raw[i] - '0')
+		if value > (max-digit)/10 {
+			return 0, errJSONRPCNumericIDTooLarge
+		}
+		value = value*10 + digit
+	}
+	return value, nil
+}
+
+func isASCIIDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+func formatCanonicalJSONRPCNumericID(negative bool, digits string, exp10 int) (string, error) {
+	for len(digits) > 0 && digits[len(digits)-1] == '0' {
+		digits = digits[:len(digits)-1]
+		exp10++
+	}
+
+	if digits == "" {
+		return "0", nil
+	}
+
+	sign := ""
+	if negative {
+		sign = "-"
+	}
+
+	if exp10 >= 0 {
+		if exp10 > maxCanonicalJSONRPCIDKeyLen-len(digits) {
+			return "", errJSONRPCNumericIDTooLarge
+		}
+		result := digits + strings.Repeat("0", exp10)
+		if sign != "" {
+			result = sign + result
+		}
+		if len(result) > maxCanonicalJSONRPCIDKeyLen+len(sign) {
+			return "", errJSONRPCNumericIDTooLarge
+		}
+		return result, nil
+	}
+
+	scale := -exp10
+	if scale > maxCanonicalJSONRPCIDKeyLen {
+		return "", errJSONRPCNumericIDTooLarge
+	}
+
+	if len(digits) > scale {
+		intPart := digits[:len(digits)-scale]
+		fracPart := digits[len(digits)-scale:]
+		if len(intPart)+1+len(fracPart) > maxCanonicalJSONRPCIDKeyLen {
+			return "", errJSONRPCNumericIDTooLarge
+		}
+		result := intPart + "." + fracPart
+		if sign != "" {
+			result = sign + result
+		}
+		return result, nil
+	}
+
+	leadingZeros := scale - len(digits)
+	if leadingZeros > maxCanonicalJSONRPCIDKeyLen-len(digits)-2 {
+		return "", errJSONRPCNumericIDTooLarge
+	}
+	result := "0." + strings.Repeat("0", leadingZeros) + digits
+	if sign != "" {
+		result = sign + result
+	}
+	return result, nil
 }
 
 func (c *Connection) receive() {
@@ -117,34 +376,103 @@ func (c *Connection) receive() {
 		case msg.ID != nil && msg.Method == "":
 			c.handleResponse(&msg)
 		case msg.Method != "":
-			// Notifications (no ID) are queued for serial processing to maintain ordering.
-			// Requests (with ID) are handled concurrently since they have their own response mechanism.
-			if msg.ID == nil {
-				c.notificationWg.Add(1)
-				msgCopy := msg
-				c.notificationQueue <- &msgCopy
-			} else {
-				go c.handleInbound(&msg)
+			if msg.ID != nil {
+				idKey, err := canonicalJSONRPCIDKey(*msg.ID)
+				if err != nil {
+					c.loggerOrDefault().Error("failed to canonicalize inbound request id", "err", err, "id", string(*msg.ID))
+					idKey = string(*msg.ID)
+				}
+				reqCtx, cancel := context.WithCancelCause(c.ctx)
+
+				c.mu.Lock()
+				c.inflight[idKey] = cancel
+				c.mu.Unlock()
+
+				m := msg
+				go func(m *anyMessage, idKey string, reqCtx context.Context, cancel context.CancelCauseFunc) {
+					defer func() {
+						c.mu.Lock()
+						delete(c.inflight, idKey)
+						c.mu.Unlock()
+
+						cancel(nil)
+					}()
+					c.handleInbound(reqCtx, m)
+				}(&m, idKey, reqCtx, cancel)
+				continue
+			}
+
+			c.notificationWg.Add(1)
+
+			// Queue the notification for sequential processing.
+			m := msg
+			select {
+			case c.notificationQueue <- &m:
+			default:
+				// Balance Add above when the message was not accepted.
+				c.notificationWg.Done()
+				c.loggerOrDefault().Error("failed to queue notification; closing connection", "err", errNotificationQueueOverflow, "capacity", cap(c.notificationQueue), "queued", len(c.notificationQueue))
+				c.shutdownReceive(errNotificationQueueOverflow)
+				return
 			}
 		default:
 			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
 		}
 	}
 
-	c.cancel(errors.New("peer connection closed"))
-	c.loggerOrDefault().Info("peer connection closed")
-	close(c.notificationQueue)
+	cause := errors.New("peer connection closed")
+	if err := scanner.Err(); err != nil {
+		cause = err
+	}
+	c.shutdownReceive(cause)
 }
 
+func (c *Connection) shutdownReceive(cause error) {
+	if cause == nil {
+		cause = errors.New("connection closed")
+	}
+
+	// First, signal disconnect to callers waiting on responses.
+	c.cancel(cause)
+
+	// Then close the notification queue so already-received messages can drain.
+	// IMPORTANT: Do not block this receive goroutine waiting for the drain to complete;
+	// notification handlers may legitimately block until their context is canceled.
+	close(c.notificationQueue)
+
+	// Cancel inboundCtx after notifications finish, but ensure we don't leak forever if a
+	// handler blocks waiting for cancellation.
+	go func() {
+		done := make(chan struct{})
+		go func() {
+			c.notificationWg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(notificationQueueDrainTimeout):
+		}
+		c.inboundCancel(cause)
+	}()
+
+	c.loggerOrDefault().Info("connection closed", "cause", cause.Error())
+}
+
+// processNotifications processes notifications sequentially to maintain order.
+// It terminates when notificationQueue is closed (e.g. on disconnect in receive()).
 func (c *Connection) processNotifications() {
 	for msg := range c.notificationQueue {
-		c.handleInbound(msg)
+		c.handleInbound(c.inboundCtx, msg)
 		c.notificationWg.Done()
 	}
 }
 
 func (c *Connection) handleResponse(msg *anyMessage) {
-	idStr := string(*msg.ID)
+	idStr, err := canonicalJSONRPCIDKey(*msg.ID)
+	if err != nil {
+		c.loggerOrDefault().Error("failed to canonicalize response id", "err", err, "id", string(*msg.ID))
+		idStr = string(*msg.ID)
+	}
 
 	c.mu.Lock()
 	pr := c.pending[idStr]
@@ -169,7 +497,11 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 		return
 	}
 
-	idKey := string(p.RequestID)
+	idKey, err := canonicalJSONRPCIDKey(p.RequestID)
+	if err != nil {
+		c.loggerOrDefault().Error("failed to canonicalize $/cancel_request requestId", "err", err, "requestId", string(p.RequestID))
+		idKey = string(p.RequestID)
+	}
 
 	c.mu.Lock()
 	cancel := c.inflight[idKey]
@@ -181,8 +513,9 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 	cancel(context.Canceled)
 }
 
-func (c *Connection) handleInbound(req *anyMessage) {
+func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 	res := anyMessage{JSONRPC: "2.0"}
+
 	// copy ID if present
 	if req.ID != nil {
 		res.ID = req.ID
@@ -193,25 +526,6 @@ func (c *Connection) handleInbound(req *anyMessage) {
 			_ = c.sendMessage(res)
 		}
 		return
-	}
-
-	ctx := c.ctx
-	var cancel context.CancelCauseFunc
-	var idKey string
-	if req.ID != nil && req.Method != "" {
-		idKey = string(*req.ID)
-		ctx, cancel = context.WithCancelCause(c.ctx)
-
-		c.mu.Lock()
-		c.inflight[idKey] = cancel
-		c.mu.Unlock()
-		defer func() {
-			c.mu.Lock()
-			delete(c.inflight, idKey)
-			c.mu.Unlock()
-
-			cancel(nil)
-		}()
 	}
 
 	result, err := c.handler(ctx, req.Method, req.Params)
@@ -241,14 +555,15 @@ func (c *Connection) handleInbound(req *anyMessage) {
 }
 
 func (c *Connection) sendMessage(msg anyMessage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	msg.JSONRPC = "2.0"
 	b, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	_, err = c.w.Write(b)
 	return err
 }
@@ -316,6 +631,31 @@ func (c *Connection) prepareRequest(method string, params any) (anyMessage, stri
 	return msg, string(idRaw), nil
 }
 
+func (c *Connection) sendCancelRequests() {
+	for {
+		select {
+		case <-c.Done():
+			return
+		case <-c.cancelRequestSignal:
+			for {
+				c.mu.Lock()
+				if len(c.pendingCancelRequest) == 0 {
+					c.mu.Unlock()
+					break
+				}
+				idKey := c.pendingCancelRequest[0]
+				c.pendingCancelRequest = c.pendingCancelRequest[1:]
+				c.mu.Unlock()
+
+				requestID := json.RawMessage(append([]byte(nil), idKey...))
+				if err := c.SendNotification(context.Background(), "$/cancel_request", cancelRequestParams{RequestID: requestID}); err != nil {
+					c.loggerOrDefault().Debug("failed to send $/cancel_request", "err", err)
+				}
+			}
+		}
+	}
+}
+
 func (c *Connection) sendCancelRequest(idKey string) {
 	if strings.TrimSpace(idKey) == "" {
 		return
@@ -327,14 +667,42 @@ func (c *Connection) sendCancelRequest(idKey string) {
 	default:
 	}
 
-	_ = c.SendNotification(context.Background(), "$/cancel_request", cancelRequestParams{RequestID: json.RawMessage([]byte(idKey))})
+	queueFull := false
+	c.mu.Lock()
+	if len(c.pendingCancelRequest) >= maxPendingCancelRequests {
+		queueFull = true
+	} else {
+		c.pendingCancelRequest = append(c.pendingCancelRequest, idKey)
+	}
+	c.mu.Unlock()
+
+	if queueFull {
+		c.loggerOrDefault().Debug("dropping $/cancel_request due to full queue", "queue_len", maxPendingCancelRequests)
+		return
+	}
+
+	select {
+	case c.cancelRequestSignal <- struct{}{}:
+	default:
+	}
 }
 
 func (c *Connection) waitForResponse(ctx context.Context, pr *pendingResponse, idKey string) (anyMessage, error) {
+	peerDisconnectedErr := NewInternalError(map[string]any{"error": "peer disconnected before response"})
+
 	select {
 	case resp := <-pr.ch:
 		return resp, nil
 	case <-ctx.Done():
+		// If the connection dropped at the same time, prefer reporting peer disconnect
+		// and avoid queueing a best-effort cancel notification to a dead peer.
+		select {
+		case <-c.Done():
+			c.cleanupPending(idKey)
+			return anyMessage{}, peerDisconnectedErr
+		default:
+		}
+
 		c.sendCancelRequest(idKey)
 		c.cleanupPending(idKey)
 
@@ -343,11 +711,12 @@ func (c *Connection) waitForResponse(ctx context.Context, pr *pendingResponse, i
 			cause = ctx.Err()
 		}
 		if cause != nil {
-			return anyMessage{}, NewRequestCancelled(map[string]any{"error": cause.Error()})
+			return anyMessage{}, toReqErr(cause)
 		}
-		return anyMessage{}, NewRequestCancelled(nil)
+		return anyMessage{}, NewInternalError(map[string]any{"error": "request context ended without cause"})
 	case <-c.Done():
-		return anyMessage{}, NewInternalError(map[string]any{"error": "peer disconnected before response"})
+		c.cleanupPending(idKey)
+		return anyMessage{}, peerDisconnectedErr
 	}
 }
 
