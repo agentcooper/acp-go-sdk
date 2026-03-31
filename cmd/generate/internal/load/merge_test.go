@@ -54,6 +54,30 @@ func TestMergeStableAndUnstable(t *testing.T) {
 		}
 	})
 
+	t.Run("allows omitted unstable version", func(t *testing.T) {
+		stableMeta := &Meta{Version: 2}
+		stableSchema := &Schema{Defs: map[string]*Definition{}}
+
+		unstableMeta := &Meta{AgentMethods: map[string]string{"foo": "unstable/foo"}}
+		unstableSchema := &Schema{Defs: map[string]*Definition{
+			"FooRequest": {
+				Type:    "object",
+				XMethod: "unstable/foo",
+				XSide:   "agent",
+			},
+		}}
+
+		combinedMeta, _ := mustMerge(t, stableMeta, stableSchema, unstableMeta, unstableSchema)
+
+		if combinedMeta.Version != stableMeta.Version {
+			t.Fatalf("expected merged version %d, got %d", stableMeta.Version, combinedMeta.Version)
+		}
+		if combinedMeta.AgentMethods["foo"] != "unstable/foo" {
+			t.Fatalf("combined meta missing unstable method: got %q", combinedMeta.AgentMethods["foo"])
+		}
+	})
+
+
 	t.Run("transitive ref rewriting when referenced type is new or changed", func(t *testing.T) {
 		stableMeta := &Meta{Version: 1}
 		stableSchema := &Schema{Defs: map[string]*Definition{
@@ -93,6 +117,63 @@ func TestMergeStableAndUnstable(t *testing.T) {
 			t.Fatalf("expected unstable input schema refs to remain unchanged; got %q", got)
 		}
 	})
+
+	t.Run("traverses unchanged intermediaries to reach changed descendants", func(t *testing.T) {
+		stableMeta := &Meta{Version: 1}
+		stableSchema := &Schema{Defs: map[string]*Definition{
+			"Wrapper": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"leaf": ref("Leaf"),
+				},
+			},
+			"Leaf": {Description: "stable leaf", Type: "object"},
+		}}
+
+		unstableMeta := &Meta{Version: 1, AgentMethods: map[string]string{"foo": "unstable/foo"}}
+		unstableSchema := &Schema{Defs: map[string]*Definition{
+			"FooRequest": {
+				Type:    "object",
+				XMethod: "unstable/foo",
+				XSide:   "agent",
+				Properties: map[string]*Definition{
+					"wrapper": ref("Wrapper"),
+				},
+			},
+			// Intentionally unchanged relative to stable.
+			"Wrapper": {
+				Type: "object",
+				Properties: map[string]*Definition{
+					"leaf": ref("Leaf"),
+				},
+			},
+			// Changed descendant reachable only through unchanged Wrapper.
+			"Leaf": {Description: "unstable leaf", Type: "object"},
+		}}
+
+		_, combinedSchema := mustMerge(t, stableMeta, stableSchema, unstableMeta, unstableSchema)
+
+		unstableReq := combinedSchema.Defs["UnstableFooRequest"]
+		if unstableReq == nil {
+			t.Fatalf("expected UnstableFooRequest definition to be added")
+		}
+		if got := unstableReq.Properties["wrapper"].Ref; got != "#/$defs/UnstableWrapper" {
+			t.Fatalf("expected wrapper ref rewritten to UnstableWrapper; got %q", got)
+		}
+
+		unstableWrapper := combinedSchema.Defs["UnstableWrapper"]
+		if unstableWrapper == nil {
+			t.Fatalf("expected UnstableWrapper definition to be added")
+		}
+		if got := unstableWrapper.Properties["leaf"].Ref; got != "#/$defs/UnstableLeaf" {
+			t.Fatalf("expected leaf ref rewritten to UnstableLeaf; got %q", got)
+		}
+
+		if combinedSchema.Defs["UnstableLeaf"] == nil {
+			t.Fatalf("expected UnstableLeaf definition to be added")
+		}
+	})
+
 
 	t.Run("no duplication for identical referenced types", func(t *testing.T) {
 		stableMeta := &Meta{Version: 1}
