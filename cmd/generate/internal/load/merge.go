@@ -243,7 +243,6 @@ func buildUnstableDuplicateSet(stableSchema *Schema, unstableSchema *Schema, uns
 	return dupSet, nil
 }
 
-
 func collectDefinitionRefs(root *Definition) map[string]struct{} {
 	refs := map[string]struct{}{}
 	visitDefinition(root, func(d *Definition) {
@@ -375,7 +374,6 @@ func addMissingTransitiveRefs(combinedSchema *Schema, unstableSchema *Schema, du
 		}
 	}
 }
-
 
 func deepCopyDefinition(d *Definition) *Definition {
 	if d == nil {

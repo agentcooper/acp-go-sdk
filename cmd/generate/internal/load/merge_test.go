@@ -77,7 +77,6 @@ func TestMergeStableAndUnstable(t *testing.T) {
 		}
 	})
 
-
 	t.Run("transitive ref rewriting when referenced type is new or changed", func(t *testing.T) {
 		stableMeta := &Meta{Version: 1}
 		stableSchema := &Schema{Defs: map[string]*Definition{
@@ -173,7 +172,6 @@ func TestMergeStableAndUnstable(t *testing.T) {
 			t.Fatalf("expected UnstableLeaf definition to be added")
 		}
 	})
-
 
 	t.Run("no duplication for identical referenced types", func(t *testing.T) {
 		stableMeta := &Meta{Version: 1}

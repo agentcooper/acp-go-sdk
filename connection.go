@@ -656,7 +656,6 @@ func (c *Connection) sendCancelRequests() {
 	}
 }
 
-
 func (c *Connection) sendCancelRequest(idKey string) {
 	if strings.TrimSpace(idKey) == "" {
 		return
