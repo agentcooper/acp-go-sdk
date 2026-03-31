@@ -61,7 +61,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if err := p.Validate(); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		exp, ok := a.agent.(AgentExperimental)
+		exp, ok := a.agent.(interface {
+			UnstableForkSession(context.Context, UnstableForkSessionRequest) (UnstableForkSessionResponse, error)
+		})
 		if !ok {
 			return nil, NewMethodNotFound(method)
 		}
@@ -78,7 +80,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if err := p.Validate(); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		exp, ok := a.agent.(AgentExperimental)
+		exp, ok := a.agent.(interface {
+			UnstableListSessions(context.Context, UnstableListSessionsRequest) (UnstableListSessionsResponse, error)
+		})
 		if !ok {
 			return nil, NewMethodNotFound(method)
 		}
@@ -150,7 +154,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if err := p.Validate(); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		exp, ok := a.agent.(AgentExperimental)
+		exp, ok := a.agent.(interface {
+			UnstableResumeSession(context.Context, UnstableResumeSessionRequest) (UnstableResumeSessionResponse, error)
+		})
 		if !ok {
 			return nil, NewMethodNotFound(method)
 		}
@@ -193,7 +199,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if err := p.Validate(); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		exp, ok := a.agent.(AgentExperimental)
+		exp, ok := a.agent.(interface {
+			UnstableSetSessionModel(context.Context, UnstableSetSessionModelRequest) (UnstableSetSessionModelResponse, error)
+		})
 		if !ok {
 			return nil, NewMethodNotFound(method)
 		}

@@ -1113,7 +1113,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				}
 			} else if !isNull && !isObj && v.Title != "" {
 				// Array variants: emit as named slice types
-				if isArr {
+				if isArray {
 					if v.Description != "" {
 						emitDocComment(f, v.Description)
 					}

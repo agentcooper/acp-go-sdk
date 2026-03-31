@@ -1345,7 +1345,7 @@ type ErrorCodeInternalError int
 //
 // Execution of the method was aborted either due to a cancellation request from the caller or
 // because of resource constraints or shutdown.
-type ErrorCodeRequestCancelled struct{}
+type ErrorCodeRequestCancelled int
 
 // **Authentication required**: Authentication is required before this operation can be performed.
 type ErrorCodeAuthenticationRequired int
@@ -1522,11 +1522,12 @@ func (u ErrorCode) MarshalJSON() ([]byte, error) {
 		return json.Marshal(m)
 	}
 	if u.RequestCancelled != nil {
-		var m map[string]any
 		_b, _e := json.Marshal(*u.RequestCancelled)
 		if _e != nil {
 			return []byte{}, _e
 		}
+		return _b, nil
+		var m map[string]any
 		if json.Unmarshal(_b, &m) != nil {
 			return []byte{}, errors.New("invalid variant payload")
 		}
@@ -2238,33 +2239,6 @@ type McpServerStdio struct {
 	// Environment variables to set when launching the MCP server.
 	Env []EnvVariable `json:"env"`
 	// Human-readable name identifying this MCP server.
-	Name string `json:"name"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// A unique identifier for a model.
-type ModelId string
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// Information about a selectable model.
-type ModelInfo struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// Optional description of the model.
-	Description *string `json:"description,omitempty"`
-	// Unique identifier for the model.
-	ModelId ModelId `json:"modelId"`
-	// Human-readable name of the model.
 	Name string `json:"name"`
 }
 
@@ -3107,7 +3081,7 @@ func (u *SessionConfigOption) UnmarshalJSON(b []byte) error {
 			return nil
 		}
 	}
-	return nil
+	return errors.New("no matching variant for union")
 }
 func (u SessionConfigOption) MarshalJSON() ([]byte, error) {
 	if u.Select != nil {
@@ -3215,31 +3189,46 @@ func (u *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
 			return err
 		}
 	}
-	{
-		var arr []json.RawMessage
-		if json.Unmarshal(b, &arr) == nil {
-			if len(arr) == 0 {
-				var v SessionConfigSelectOptionsUngrouped
-				u.Ungrouped = &v
-				return nil
-			}
-			var first map[string]json.RawMessage
-			if json.Unmarshal(arr[0], &first) == nil {
-				if _, ok := first["group"]; ok {
-					var v SessionConfigSelectOptionsGrouped
-					if json.Unmarshal(b, &v) != nil {
-						return errors.New("invalid variant payload")
-					}
-					u.Grouped = &v
-					return nil
+	var arr []map[string]json.RawMessage
+	if json.Unmarshal(b, &arr) == nil {
+		{
+			var v SessionConfigSelectOptionsUngrouped
+			var match bool = true
+			for _, elem := range arr {
+				if _, ok := elem["name"]; !ok {
+					match = false
+				}
+				if _, ok := elem["value"]; !ok {
+					match = false
 				}
 			}
-			{
-				var v SessionConfigSelectOptionsUngrouped
+			if match {
 				if json.Unmarshal(b, &v) != nil {
 					return errors.New("invalid variant payload")
 				}
 				u.Ungrouped = &v
+				return nil
+			}
+		}
+		{
+			var v SessionConfigSelectOptionsGrouped
+			var match bool = true
+			for _, elem := range arr {
+				if _, ok := elem["group"]; !ok {
+					match = false
+				}
+				if _, ok := elem["name"]; !ok {
+					match = false
+				}
+				if _, ok := elem["options"]; !ok {
+					match = false
+				}
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Grouped = &v
 				return nil
 			}
 		}
@@ -3258,7 +3247,7 @@ func (u *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
 			return nil
 		}
 	}
-	return nil
+	return errors.New("no matching variant for union")
 }
 func (u SessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
 	if u.Ungrouped != nil {
@@ -3358,24 +3347,6 @@ type SessionModeState struct {
 	AvailableModes []SessionMode `json:"availableModes"`
 	// The current mode the Agent is in.
 	CurrentModeId SessionModeId `json:"currentModeId"`
-}
-
-// **UNSTABLE**
-//
-// This capability is not part of the spec yet, and may be removed or changed at any point.
-//
-// The set of models and the one currently active.
-type SessionModelState struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-	Meta map[string]any `json:"_meta,omitempty"`
-	// The set of models that the Agent can use
-	AvailableModels []ModelInfo `json:"availableModels"`
-	// The current model the Agent is in.
-	CurrentModelId ModelId `json:"currentModelId"`
 }
 
 // Notification containing a session update from the agent.
@@ -4005,7 +3976,7 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 			return nil
 		}
 	}
-	return nil
+	return errors.New("no matching variant for union")
 }
 func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 	if u.UserMessageChunk != nil {
