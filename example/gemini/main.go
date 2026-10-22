@@ -161,6 +161,14 @@ func (c *replClient) KillTerminal(ctx context.Context, params acp.KillTerminalRe
 	return acp.KillTerminalResponse{}, nil
 }
 
+func (c *replClient) CreateElicitation(ctx context.Context, params acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{}, acp.NewMethodNotFound(acp.ClientMethodElicitationCreate)
+}
+
+func (c *replClient) CompleteElicitation(ctx context.Context, params acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 func main() {
 	binary := flag.String("gemini", "gemini", "Path to the Gemini CLI binary")
 	model := flag.String("model", "", "Model to pass to Gemini (optional)")

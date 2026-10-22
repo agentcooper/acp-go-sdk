@@ -97,6 +97,14 @@ func (clientExample) KillTerminal(ctx context.Context, p KillTerminalRequest) (K
 	return KillTerminalResponse{}, nil
 }
 
+func (clientExample) CreateElicitation(ctx context.Context, params CreateElicitationRequest) (CreateElicitationResponse, error) {
+	return CreateElicitationResponse{}, NewMethodNotFound(ClientMethodElicitationCreate)
+}
+
+func (clientExample) CompleteElicitation(ctx context.Context, params CompleteElicitationNotification) error {
+	return nil
+}
+
 func (clientExample) ReleaseTerminal(ctx context.Context, p ReleaseTerminalRequest) (ReleaseTerminalResponse, error) {
 	return ReleaseTerminalResponse{}, nil
 }

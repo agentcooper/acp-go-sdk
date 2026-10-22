@@ -46,6 +46,14 @@ func (geminiClient) KillTerminal(ctx context.Context, p KillTerminalRequest) (Ki
 	return KillTerminalResponse{}, nil
 }
 
+func (geminiClient) CreateElicitation(ctx context.Context, params CreateElicitationRequest) (CreateElicitationResponse, error) {
+	return CreateElicitationResponse{}, NewMethodNotFound(ClientMethodElicitationCreate)
+}
+
+func (geminiClient) CompleteElicitation(ctx context.Context, params CompleteElicitationNotification) error {
+	return nil
+}
+
 func (geminiClient) ReleaseTerminal(ctx context.Context, p ReleaseTerminalRequest) (ReleaseTerminalResponse, error) {
 	return ReleaseTerminalResponse{}, nil
 }

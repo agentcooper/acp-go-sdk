@@ -61,59 +61,9 @@ func (a *exampleAgent) SetSessionConfigOption(ctx context.Context, params acp.Se
 	return acp.SetSessionConfigOptionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionSetConfigOption)
 }
 
-// UnstableDidChangeDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidChangeDocument(ctx context.Context, params acp.UnstableDidChangeDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidCloseDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidCloseDocument(ctx context.Context, params acp.UnstableDidCloseDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidFocusDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidFocusDocument(ctx context.Context, params acp.UnstableDidFocusDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidOpenDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidOpenDocument(ctx context.Context, params acp.UnstableDidOpenDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidSaveDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidSaveDocument(ctx context.Context, params acp.UnstableDidSaveDocumentNotification) error {
-	return nil
-}
-
 // Logout implements acp.Agent.
 func (a *exampleAgent) Logout(ctx context.Context, params acp.LogoutRequest) (acp.LogoutResponse, error) {
 	return acp.LogoutResponse{}, acp.NewMethodNotFound(acp.AgentMethodLogout)
-}
-
-// UnstableAcceptNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableAcceptNes(ctx context.Context, params acp.UnstableAcceptNesNotification) error {
-	return nil
-}
-
-// UnstableCloseNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableCloseNes(ctx context.Context, params acp.UnstableCloseNesRequest) (acp.UnstableCloseNesResponse, error) {
-	return acp.UnstableCloseNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesClose)
-}
-
-// UnstableRejectNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableRejectNes(ctx context.Context, params acp.UnstableRejectNesNotification) error {
-	return nil
-}
-
-// UnstableStartNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableStartNes(ctx context.Context, params acp.UnstableStartNesRequest) (acp.UnstableStartNesResponse, error) {
-	return acp.UnstableStartNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesStart)
-}
-
-// UnstableSuggestNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableSuggestNes(ctx context.Context, params acp.UnstableSuggestNesRequest) (acp.UnstableSuggestNesResponse, error) {
-	return acp.UnstableSuggestNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesSuggest)
 }
 
 // UnstableDisableProvider implements acp.AgentExperimental.
@@ -131,9 +81,14 @@ func (a *exampleAgent) UnstableSetProvider(ctx context.Context, params acp.Unsta
 	return acp.UnstableSetProviderResponse{}, acp.NewMethodNotFound(acp.AgentMethodProvidersSet)
 }
 
-// UnstableDeleteSession implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDeleteSession(ctx context.Context, params acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
-	return acp.UnstableDeleteSessionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionDelete)
+// DeleteSession implements acp.Agent.
+func (a *exampleAgent) DeleteSession(ctx context.Context, params acp.DeleteSessionRequest) (acp.DeleteSessionResponse, error) {
+	return acp.DeleteSessionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionDelete)
+}
+
+// UnstableMessageMcp implements acp.AgentExperimental.
+func (a *exampleAgent) UnstableMessageMcp(ctx context.Context, params acp.UnstableMessageMcpNotification) error {
+	return nil
 }
 
 // CloseSession implements acp.Agent.

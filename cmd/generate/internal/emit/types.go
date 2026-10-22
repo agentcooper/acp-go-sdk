@@ -590,6 +590,11 @@ func emitValidateJen(f *File, name string, def *load.Definition) {
 			return
 		}
 		f.Func().Params(Id("v").Op("*").Id(name)).Id("Validate").Params().Params(Error()).BlockFunc(func(g *Group) {
+			// anyOf wrappers hold only variant pointers; shared properties live on the variants.
+			if len(def.AnyOf) > 0 {
+				g.Return(Nil())
+				return
+			}
 			pkeys := make([]string, 0, len(def.Properties))
 			for pk := range def.Properties {
 				pkeys = append(pkeys, pk)

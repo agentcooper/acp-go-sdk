@@ -37,6 +37,11 @@ func (a *agentExample) SetSessionConfigOption(ctx context.Context, params SetSes
 	return SetSessionConfigOptionResponse{}, nil
 }
 
+// DeleteSession implements Agent.
+func (a *agentExample) DeleteSession(ctx context.Context, params DeleteSessionRequest) (DeleteSessionResponse, error) {
+	return DeleteSessionResponse{}, nil
+}
+
 // Logout implements Agent.
 func (a *agentExample) Logout(ctx context.Context, params LogoutRequest) (LogoutResponse, error) {
 	return LogoutResponse{}, nil

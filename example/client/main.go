@@ -157,6 +157,14 @@ func (c *exampleClient) KillTerminal(ctx context.Context, params acp.KillTermina
 	return acp.KillTerminalResponse{}, nil
 }
 
+func (e *exampleClient) CreateElicitation(ctx context.Context, params acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{}, acp.NewMethodNotFound(acp.ClientMethodElicitationCreate)
+}
+
+func (e *exampleClient) CompleteElicitation(ctx context.Context, params acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 func main() {
 	// If args provided, treat them as agent program + args. Otherwise run the Go agent example.
 	ctx, cancel := context.WithCancel(context.Background())
