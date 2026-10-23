@@ -578,6 +578,11 @@ func isOpenStringEnum(def *load.Definition) bool {
 
 func emitValidateJen(f *File, name string, def *load.Definition) {
 	switch name {
+	case "CreateElicitationRequest":
+		f.Func().Params(Id("v").Op("*").Id(name)).Id("Validate").Params().Params(Error()).Block(
+			Return(Id("v").Dot("validateElicitation").Call()),
+		)
+		return
 	case "ToolCallUpdate":
 		f.Func().Params(Id("t").Op("*").Id("ToolCallUpdate")).Id("Validate").Params().Params(Error()).Block(
 			If(Id("t").Dot("ToolCallId").Op("==").Lit("")).Block(Return(Qual("fmt", "Errorf").Call(Lit("toolCallId is required")))),
@@ -1090,6 +1095,14 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				for pk, pDef := range v.Properties {
 					mergedProps[pk] = pDef
 				}
+				// A variant may itself contain a flattened union (for example,
+				// elicitation's session/request scope). Preserve those fields in
+				// the enclosing struct, optional because they belong to alternatives.
+				for pk, pDef := range flattenedUnionProperties(schema, v) {
+					if _, exists := mergedProps[pk]; !exists {
+						mergedProps[pk] = pDef
+					}
+				}
 				pkeys := make([]string, 0, len(mergedProps))
 				for pk := range mergedProps {
 					pkeys = append(pkeys, pk)
@@ -1374,4 +1387,41 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		})
 		f.Line()
 	}
+}
+
+// flattenedUnionProperties collects fields from object alternatives nested inside
+// an inline object variant. The outer union still owns its discriminator.
+func flattenedUnionProperties(schema *load.Schema, d *load.Definition) map[string]*load.Definition {
+	props := map[string]*load.Definition{}
+	for _, alternatives := range [][]*load.Definition{d.AnyOf, d.OneOf} {
+		for _, alternative := range alternatives {
+			if alternative == nil {
+				continue
+			}
+			if alternative.Ref != "" {
+				alternative = schema.Defs[strings.TrimPrefix(alternative.Ref, "#/$defs/")]
+			}
+			if alternative == nil {
+				continue
+			}
+			alternative = expandAllOf(schema, alternative)
+			for name, prop := range alternative.Properties {
+				if includesNull(prop) || len(prop.AnyOf) > 0 {
+					props[name] = prop
+					continue
+				}
+				// Unwrap metadata-only allOf references before making nullable,
+				// so the Go type remains a pointer to the referenced type.
+				value := prop
+				if len(prop.AllOf) == 1 && prop.AllOf[0].Ref != "" {
+					value = prop.AllOf[0]
+				}
+				props[name] = &load.Definition{
+					Description: prop.Description,
+					AnyOf:       []*load.Definition{value, {Type: "null"}},
+				}
+			}
+		}
+	}
+	return props
 }
