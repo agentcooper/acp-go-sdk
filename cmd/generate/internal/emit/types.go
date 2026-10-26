@@ -130,6 +130,23 @@ func appendDocComments(codeSlice []Code, desc string) []Code {
 	return codeSlice
 }
 
+// appendCompactionPatchPresence keeps the presence API used by compaction.go
+// reproducible for both the standalone object and the flattened session variant.
+// Keep this scoped: other nullable fields generally treat omission and null alike.
+func appendCompactionPatchPresence(fields []Code, name string) []Code {
+	if name != "CompactionUpdate" && name != "SessionCompactionUpdate" {
+		return fields
+	}
+	for _, field := range []string{"Summary", "Error", "Meta"} {
+		fields = append(fields,
+			Comment(field+"Present reports whether the patch field was supplied, including null."),
+			Comment("Set it with a nil value to marshal an explicit null; non-nil values marshal regardless."),
+			Id(field+"Present").Bool().Tag(map[string]string{"json": "-"}),
+		)
+	}
+	return fields
+}
+
 // WriteTypesJen emits go/types_gen.go with all types and the Agent/Client interfaces.
 func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 	f := NewFile("acp")
@@ -351,6 +368,7 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				}
 				st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
 			}
+			st = appendCompactionPatchPresence(st, name)
 			f.Type().Id(name).Struct(st...)
 			f.Line()
 
@@ -1149,6 +1167,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				// Skip the struct emission below for title-only variants
 				goto skipStructEmit
 			}
+			st = appendCompactionPatchPresence(st, tname)
 			f.Type().Id(tname).Struct(st...)
 			f.Line()
 		skipStructEmit:

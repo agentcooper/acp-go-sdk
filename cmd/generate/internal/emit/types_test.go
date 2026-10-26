@@ -10,6 +10,65 @@ import (
 	"github.com/coder/acp-go-sdk/cmd/generate/internal/load"
 )
 
+// Cover the standalone object and the flattened SessionUpdate variant paths.
+func TestWriteTypesJen_CompactionPatchPresence(t *testing.T) {
+	schemaDir := filepath.Join("..", "..", "..", "..", "schema")
+	schema, err := load.ReadSchema(schemaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := load.ReadMeta(schemaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := WriteTypesJen(out, schema, meta); err != nil {
+		t.Fatal(err)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(out, "types_gen.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"CompactionUpdate": false, "SessionCompactionUpdate": false}
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.TypeSpec)
+		if !ok {
+			return true
+		}
+		if _, ok := want[spec.Name.Name]; !ok {
+			return true
+		}
+		want[spec.Name.Name] = true
+		fields := map[string]bool{"SummaryPresent": false, "ErrorPresent": false, "MetaPresent": false}
+		for _, field := range spec.Type.(*ast.StructType).Fields.List {
+			for _, name := range field.Names {
+				if _, ok := fields[name.Name]; !ok {
+					continue
+				}
+				fields[name.Name] = true
+				id, ok := field.Type.(*ast.Ident)
+				if !ok || id.Name != "bool" {
+					t.Fatalf("%s.%s must be bool", spec.Name, name)
+				}
+				if field.Tag == nil || field.Tag.Value != "`json:\"-\"`" {
+					t.Fatalf("%s.%s must not appear on the wire", spec.Name, name)
+				}
+			}
+		}
+		for name, found := range fields {
+			if !found {
+				t.Errorf("%s missing %s", spec.Name, name)
+			}
+		}
+		return false
+	})
+	for name, found := range want {
+		if !found {
+			t.Errorf("missing generated type %s", name)
+		}
+	}
+}
+
 func TestFlattenedUnionProperties_Scope(t *testing.T) {
 	session := &load.Definition{AllOf: []*load.Definition{{Ref: "#/$defs/SessionId"}}, Description: "Session scope"}
 	tool := &load.Definition{AnyOf: []*load.Definition{{Ref: "#/$defs/ToolCallId"}, {Type: "null"}}}

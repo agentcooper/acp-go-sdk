@@ -1088,6 +1088,15 @@ type CompactionUpdate struct {
 	Status CompactionStatus `json:"status"`
 	// Complete replacement user-displayable summary content for the compaction.
 	Summary []ContentBlock `json:"summary,omitempty"`
+	// SummaryPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	SummaryPresent bool `json:"-"`
+	// ErrorPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	ErrorPresent bool `json:"-"`
+	// MetaPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	MetaPresent bool `json:"-"`
 }
 
 // Notification sent by the agent when a URL-based elicitation is complete.
@@ -7525,6 +7534,15 @@ type SessionCompactionUpdate struct {
 	Status CompactionStatus `json:"status"`
 	// Complete replacement user-displayable summary content for the compaction.
 	Summary []ContentBlock `json:"summary,omitempty"`
+	// SummaryPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	SummaryPresent bool `json:"-"`
+	// ErrorPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	ErrorPresent bool `json:"-"`
+	// MetaPresent reports whether the patch field was supplied, including null.
+	// Set it with a nil value to marshal an explicit null; non-nil values marshal regardless.
+	MetaPresent bool `json:"-"`
 }
 
 // A content block appended to a context compaction's retained summary.
