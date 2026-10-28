@@ -599,12 +599,30 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 	cancel(context.Canceled)
 }
 
+type inboundRequestIDKey struct{}
+
+// RequestIDFromContext returns the JSON-RPC ID of the inbound request being
+// handled. It is absent for notifications and contexts outside request handlers.
+// The returned ID is an independent copy and preserves string versus numeric IDs.
+func RequestIDFromContext(ctx context.Context) (RequestId, bool) {
+	raw, ok := ctx.Value(inboundRequestIDKey{}).(string)
+	if !ok {
+		return RequestId{}, false
+	}
+	var id RequestId
+	if err := json.Unmarshal([]byte(raw), &id); err != nil || (id.Number == nil && id.Str == nil) {
+		return RequestId{}, false
+	}
+	return id, true
+}
+
 func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 	res := anyMessage{JSONRPC: "2.0"}
 
 	// copy ID if present
 	if req.ID != nil {
 		res.ID = req.ID
+		ctx = context.WithValue(ctx, inboundRequestIDKey{}, string(*req.ID))
 	}
 	if c.handler == nil {
 		if req.ID != nil {
